@@ -84,10 +84,13 @@ function filterCloudWatchLogs() {
   if (!tbody) return;
 
   const filtered = allCloudWatchLogs.filter(log => {
+    const msgStr = (log.message || "").toLowerCase();
+    const grpStr = (log.log_group || "").toLowerCase();
+    const payloadStr = JSON.stringify(log.payload || {}).toLowerCase();
     const matchQuery = !query || 
-      log.message.toLowerCase().includes(query) || 
-      log.log_group.toLowerCase().includes(query) || 
-      JSON.stringify(log.payload || {}).toLowerCase().includes(query);
+      msgStr.includes(query) || 
+      grpStr.includes(query) || 
+      payloadStr.includes(query);
     const matchLevel = levelFilter === "ALL" || log.level === levelFilter;
     return matchQuery && matchLevel;
   });
@@ -97,10 +100,14 @@ function filterCloudWatchLogs() {
     return;
   }
 
-  tbody.innerHTML = filtered.map(log => `
+  tbody.innerHTML = filtered.map(log => {
+    const rawTs = log.timestamp;
+    const ts = (typeof rawTs === 'number' && rawTs < 1e11) ? rawTs * 1000 : rawTs;
+    const timeDisplay = ts ? new Date(ts).toLocaleTimeString() : 'N/A';
+    return `
     <tr>
       <td style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-dim); white-space: nowrap;">
-        ${new Date(log.timestamp).toLocaleTimeString()}
+        ${timeDisplay}
       </td>
       <td>
         <span class="badge ${log.level === 'WARN' ? 'badge-medium' : log.level === 'ERROR' ? 'badge-high' : 'badge-low'}" style="font-size: 0.7rem;">
@@ -115,5 +122,6 @@ function filterCloudWatchLogs() {
         ${log.payload && Object.keys(log.payload).length > 0 ? `<div style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono); margin-top: 0.2rem;">${JSON.stringify(log.payload)}</div>` : ''}
       </td>
     </tr>
-  `).join("");
+    `;
+  }).join("");
 }

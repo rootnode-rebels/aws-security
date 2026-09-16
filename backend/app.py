@@ -8,12 +8,14 @@ import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
+import asyncio
+import json
 
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from fastapi import FastAPI, Request, Response, HTTPException, Depends, Header, status
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -22,6 +24,7 @@ from pydantic import BaseModel, Field
 from database.db_manager import db
 from backend.security.sanitizer import sanitize_string, sanitize_email, sanitize_mongo_dict
 from backend.security.rate_limiter import rate_limiter
+from backend.security.desktop_notifier import send_desktop_notification
 from backend.security.auth import (
     hash_password, verify_password, generate_session_token,
     generate_mfa_code, generate_reset_token, validate_password_strength
@@ -31,26 +34,66 @@ from backend.ml.model import ml_engine
 from backend.ml.tf_autoencoder import tf_autoencoder
 from backend.monitoring.cloudwatch_service import cloudwatch
 
+# In-memory pub-sub for live SSE notification delivery to primary devices
+class NotificationBroadcaster:
+    def __init__(self):
+        self._listeners: Dict[str, List[asyncio.Queue]] = {}
+
+    def subscribe(self, email: str) -> asyncio.Queue:
+        q = asyncio.Queue(maxsize=50)
+        if email not in self._listeners:
+            self._listeners[email] = []
+        self._listeners[email].append(q)
+        return q
+
+    def unsubscribe(self, email: str, q: asyncio.Queue):
+        if email in self._listeners and q in self._listeners[email]:
+            self._listeners[email].remove(q)
+            if not self._listeners[email]:
+                del self._listeners[email]
+
+    def broadcast_sync(self, email: str, event_data: dict):
+        if email in self._listeners:
+            for q in list(self._listeners[email]):
+                try:
+                    q.put_nowait(event_data)
+                except Exception:
+                    pass
+
+    async def broadcast(self, email: str, event_data: dict):
+        self.broadcast_sync(email, event_data)
+
+broadcaster = NotificationBroadcaster()
+
 app = FastAPI(
     title="Real-Time Account Hijacking Detection & Prevention System",
     version="2.0.0",
     description="AWS Serverless & ML-driven Cybersecurity Defense Platform"
 )
 
-# CORS configuration
+# CORS configuration (W3C compliant credentials-ready CORS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^https?://.*$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 # Maintenance mode toggle for UX state demonstration
 MAINTENANCE_MODE = False
 
 def seed_demo_user_if_needed():
     """Seeds baseline legitimate user accounts for instant multi-browser testing."""
+    # Check if system has already completed initial seeding so deleted accounts are not resurrected
+    system_meta = db.get_collection("system_metadata").find_one({"key": "initial_seed_completed"})
+    if system_meta:
+        return
+
     accounts = [
         ("demo@awssecurity.io", "AWSSecurity#2026", "Sachin (Demo Security Lead)"),
         ("demo@aegisguard.io", "AegisGuard#2026", "Sachin (Legacy Demo Account)")
@@ -58,6 +101,7 @@ def seed_demo_user_if_needed():
     for email, pwd, name in accounts:
         try:
             existing = db.users.find_one({"email": email})
+            sec_hash, sec_salt = hash_password("MasterKey#2026")
             if not existing:
                 pw_hash, salt = hash_password(pwd)
                 now_iso = datetime.now(timezone.utc).isoformat()
@@ -66,33 +110,48 @@ def seed_demo_user_if_needed():
                     "full_name": name,
                     "password_hash": pw_hash,
                     "salt": salt,
+                    "secondary_password_hash": sec_hash,
+                    "secondary_password_salt": sec_salt,
+                    "primary_device": None,
                     "status": "ACTIVE",
+                    "role": "ROOT_ADMIN",
+                    "is_root_admin": True,
                     "created_at": now_iso,
                     "updated_at": now_iso,
-                    "trusted_devices": [{
-                        "os": "Windows NT 10.0",
-                        "platform": "Win32",
-                        "screen_resolution": "1920x1080",
-                        "color_depth": 24,
-                        "timezone": "America/New_York",
-                        "language": "en-US",
-                        "canvas_hash": "canvas_trusted_demo"
-                    }],
-                    "last_successful_login": {
-                        "timestamp": time.time() - 7200,
-                        "geo": {"lat": 40.7128, "lon": -74.0060, "city": "New York", "country": "US"},
-                        "ip": "198.51.100.10",
-                        "device": "Windows NT 10.0"
-                    },
+                    "trusted_devices": [],
+                    "last_successful_login": None,
                     "mfa_secret": None,
                     "mfa_pending": None
                 }
                 db.users.insert_one(demo_user)
                 print(f"[AWSSecurity] Seeded default demo account: {email} / {pwd}")
+            else:
+                updates = {}
+                if not existing.get("is_root_admin"):
+                    updates["role"] = "ROOT_ADMIN"
+                    updates["is_root_admin"] = True
+                if not existing.get("secondary_password_hash"):
+                    updates["secondary_password_hash"] = sec_hash
+                    updates["secondary_password_salt"] = sec_salt
+                # Clear out dummy seeded browser_id so user's real browser can enroll as Main Device
+                prim = existing.get("primary_device")
+                if prim and prim.get("browser_id") == "chrome_uuid_legit_001":
+                    updates["primary_device"] = None
+                if updates:
+                    db.users.update_one({"email": email}, {"$set": updates})
         except Exception as e:
             print(f"[AWSSecurity] Demo user seed notice: {e}")
 
+    try:
+        db.get_collection("system_metadata").insert_one({
+            "key": "initial_seed_completed",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+    except Exception as e:
+        print(f"[AWSSecurity] system_metadata insert notice: {e}")
+
 seed_demo_user_if_needed()
+
 
 # -------------------------------------------------------------
 # Middleware: Request Correlation ID & CloudWatch Invocation Logging
@@ -102,16 +161,41 @@ async def cloudwatch_telemetry_middleware(request: Request, call_next):
     correlation_id = request.headers.get("X-Request-Id", str(uuid.uuid4()))
     start_time = time.time()
 
-    if MAINTENANCE_MODE and not request.url.path.startswith("/api/system/maintenance"):
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error": "Service Under Maintenance",
-                "message": "System security baseline update in progress. Please check back shortly.",
-                "correlation_id": correlation_id,
-                "retry_after_seconds": 300
-            }
+    if MAINTENANCE_MODE:
+        allowed_prefixes = (
+            "/api/system/maintenance",
+            "/api/system/status",
+            "/api/cms",
+            "/static",
+            "/api/auth/login",
+            "/api/auth/me"
         )
+        is_spa_asset = (
+            request.url.path == "/"
+            or request.url.path.endswith((".html", ".js", ".css", ".png", ".jpg", ".svg", ".ico", ".json"))
+        )
+        # Verify if caller is an authenticated Root Administrator
+        auth_header = request.headers.get("Authorization", "")
+        is_admin_user = False
+        if auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+            sess = db.active_sessions.find_one({"session_token": token})
+            if sess:
+                u = db.users.find_one({"email": sess.get("user_email")})
+                if u and (u.get("is_root_admin") or u.get("role") in ("ROOT_ADMIN", "ADMIN") or u.get("email") == "demo@awssecurity.io"):
+                    is_admin_user = True
+
+        if not (is_admin_user or is_spa_asset or any(request.url.path.startswith(p) for p in allowed_prefixes)):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "Service Under Maintenance",
+                    "message": "System security baseline update and ML model retraining in progress. Non-admin operations are paused.",
+                    "correlation_id": correlation_id,
+                    "retry_after_seconds": 300,
+                    "maintenance_mode": True
+                }
+            )
 
     response = await call_next(request)
     duration_ms = (time.time() - start_time) * 1000.0
@@ -155,6 +239,7 @@ class RegisterSchema(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     full_name: str = Field(min_length=2, max_length=60)
     password: str = Field(min_length=8, max_length=128)
+    secondary_password: Optional[str] = None
     fingerprint: Optional[Dict[str, Any]] = None
     geo: Optional[Dict[str, Any]] = None
 
@@ -187,6 +272,15 @@ class AccountDeleteSchema(BaseModel):
 class SetPrimaryDeviceSchema(BaseModel):
     is_primary: bool = True
     device_label: Optional[str] = None
+    secondary_password: Optional[str] = None
+
+class UpdateSecondaryPasswordSchema(BaseModel):
+    current_password: str
+    new_secondary_password: str = Field(min_length=6, max_length=128)
+
+class ApproveSecondarySchema(BaseModel):
+    temp_token: Optional[str] = "LATEST"
+    approved: bool = True
 
 
 # -------------------------------------------------------------
@@ -200,20 +294,29 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, A
     if not session or session.get("status") != "ACTIVE":
         raise HTTPException(status_code=401, detail="Session expired or revoked.")
     
-    # Check session expiration
-    now = datetime.now(timezone.utc).isoformat()
-    if session.get("expires_at", "") < now:
-        db.active_sessions.delete_one({"session_token": token})
-        raise HTTPException(status_code=401, detail="Session has expired. Please log in again.")
+    is_primary = bool(session.get("is_primary_device") or session.get("device_tier") == "PRIMARY")
+
+    # Primary device session is perpetual and immune to automatic revocation or timeout
+    if not is_primary:
+        now = datetime.now(timezone.utc).isoformat()
+        if session.get("expires_at", "") < now:
+            db.active_sessions.delete_one({"session_token": token})
+            raise HTTPException(status_code=401, detail="Session has expired. Please log in again.")
 
     user = db.users.find_one({"email": session.get("user_email")})
     if not user:
         raise HTTPException(status_code=401, detail="User account not found.")
+    
+    # If account is temporarily locked, secondary devices are blocked,
+    # but the primary device owner retains authenticated access so they can unfreeze and manage incidents.
     if user.get("status") == "LOCKED":
-        raise HTTPException(
-            status_code=403,
-            detail={"error": "ACCOUNT_LOCKED", "message": "Account is temporarily locked for security. Contact incident response."}
-        )
+        if not is_primary:
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "ACCOUNT_LOCKED", "message": "Account is temporarily locked for security. Contact incident response."}
+            )
+        user["account_is_frozen"] = True
+
     return user
 
 
@@ -239,17 +342,39 @@ def register(payload: RegisterSchema, request: Request):
     # Hash password securely (PBKDF2-HMAC-SHA256 with 200,000 iterations)
     pw_hash, salt = hash_password(payload.password)
 
+    # Secondary security password for device promotion & transfer
+    sec_pwd = payload.secondary_password or "MasterKey#2026"
+    sec_hash, sec_salt = hash_password(sec_pwd)
+
     client_ip = request.client.host if request.client else "127.0.0.1"
     geo_loc = payload.geo or {"lat": 40.7128, "lon": -74.0060, "city": "New York", "country": "US"}
     fingerprint = sanitize_mongo_dict(payload.fingerprint or {})
 
     now_iso = datetime.now(timezone.utc).isoformat()
+    browser_name = fingerprint.get("browser", "Browser")
+    os_name = fingerprint.get("os", "Desktop")
+    primary_dev = {
+        "browser_id": fingerprint.get("browser_id"),
+        "browser": browser_name,
+        "os": os_name,
+        "canvas_hash": fingerprint.get("canvas_hash"),
+        "screen_resolution": fingerprint.get("screen_resolution"),
+        "label": f"Primary Security Portal ({browser_name} on {os_name})",
+        "registered_at": now_iso
+    } if fingerprint else None
+
     user_doc = {
         "email": clean_email,
         "full_name": clean_name,
         "password_hash": pw_hash,
         "salt": salt,
+        "secondary_password_hash": sec_hash,
+        "secondary_password_salt": sec_salt,
+        "primary_device": None, # Prompts user on first login: "Keep this device as main device?"
+        "has_confirmed_primary": False,
         "status": "ACTIVE",
+        "role": "ROOT_ADMIN",
+        "is_root_admin": True,
         "created_at": now_iso,
         "updated_at": now_iso,
         "trusted_devices": [fingerprint] if fingerprint else [],
@@ -260,23 +385,43 @@ def register(payload: RegisterSchema, request: Request):
             "device": fingerprint.get("platform", "Desktop")
         },
         "mfa_secret": None,
-        "mfa_pending": None
+        "mfa_pending": None,
+        "mfa_enabled": True
     }
     db.users.insert_one(user_doc)
 
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
         level="INFO",
-        message=f"User registered: {clean_email}",
+        message=f"Root Admin registered: {clean_email}",
         payload={"ip": client_ip, "city": geo_loc.get("city")}
     )
 
-    return {"status": "success", "message": "Account successfully created. Please sign in."}
+    return {
+        "status": "success",
+        "message": "Root Admin account successfully created. Please sign in.",
+        "role": "ROOT_ADMIN",
+        "is_root_admin": True
+    }
+
+
+def resolve_client_ip(request: Request, spoofed_ip: Optional[str] = None) -> str:
+    """Extracts client IP, respecting reverse proxies (ALB/CloudFront) and simulation overrides."""
+    if spoofed_ip:
+        return spoofed_ip
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        client_ip = xff.split(",")[0].strip()
+        if client_ip:
+            return client_ip
+    if request.client and request.client.host:
+        return request.client.host
+    return "127.0.0.1"
 
 
 @app.post("/api/auth/login")
 def login(payload: LoginSchema, request: Request):
-    client_ip = payload.spoofed_ip or (request.client.host if request.client else "127.0.0.1")
+    client_ip = resolve_client_ip(request, payload.spoofed_ip)
     user_agent = payload.spoofed_user_agent or request.headers.get("user-agent", "")
     email = sanitize_email(payload.email)
     raw_password = payload.password
@@ -374,6 +519,14 @@ def login(payload: LoginSchema, request: Request):
     credentials_valid = False
     if user and user.get("status") != "LOCKED":
         credentials_valid = verify_password(raw_password, user["password_hash"], user["salt"])
+    elif user and user.get("status") == "LOCKED":
+        # Check if credentials are correct for locked account to give actionable feedback
+        if verify_password(raw_password, user["password_hash"], user["salt"]):
+            raise HTTPException(
+                status_code=403,
+                detail={"error": "ACCOUNT_LOCKED", "message": "Account has been frozen or locked. Use password reset or contact an administrator to restore access."}
+            )
+        _ = verify_password(raw_password, "0"*64, "0123456789abcdef0123456789abcdef")
     else:
         # Constant-time dummy PBKDF2 calculation prevents side-channel timing attacks (user enumeration)
         _ = verify_password(raw_password, "0"*64, "0123456789abcdef0123456789abcdef")
@@ -422,6 +575,7 @@ def login(payload: LoginSchema, request: Request):
                 ]
             }
             db.get_collection("security_alerts").insert_one(alert_doc)
+            broadcaster.broadcast_sync(email, alert_doc)
 
             # Record in security_events for SOC Blue Team
             db.security_events.insert_one({
@@ -469,6 +623,7 @@ def login(payload: LoginSchema, request: Request):
             "factors": ml_eval["explainable_factors"]
         }
         db.get_collection("security_alerts").insert_one(alert_doc)
+        broadcaster.broadcast_sync(email, alert_doc)
         raise HTTPException(
             status_code=403,
             detail={
@@ -483,37 +638,57 @@ def login(payload: LoginSchema, request: Request):
     if risk_action == "STEP_UP_MFA":
         otp = generate_mfa_code()
         temp_token = generate_session_token()
+        now_iso = datetime.now(timezone.utc).isoformat()
         db.users.update_one(
             {"email": email},
             {"$set": {
                 "mfa_pending": {
                     "code": otp,
                     "temp_token": temp_token,
-                    "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
-                    "attempt": attempt_telemetry
+                    "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+                    "attempt": attempt_telemetry,
+                    "device": fingerprint.get("os", "Unknown Device"),
+                    "device_label": f"Challenged Device ({fingerprint.get('browser', 'Browser')} on {fingerprint.get('os', 'Unknown')})",
+                    "fingerprint": fingerprint,
+                    "ip": client_ip,
+                    "geo": geo,
+                    "approved": False,
+                    "created_at": now_iso
                 }
             }}
         )
-        # Create user alert
-        db.get_collection("security_alerts").insert_one({
-            "alert_id": f"alt_{int(time.time()*1000)}",
+        # Create alert specifically delivering code to Primary Device
+        primary_dev_name = user.get("primary_device", {}).get("label", "Primary Security Portal")
+        dev_desc = f"{fingerprint.get('browser', 'Browser')} on {fingerprint.get('os', 'Unknown')}"
+        alert_doc = {
+            "alert_id": f"alt_mfa_{int(time.time()*1000)}",
             "user_email": email,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "type": "STEP_UP_MFA_CHALLENGE",
+            "created_at": now_iso,
+            "type": "SECONDARY_DEVICE_APPROVAL_REQUEST",
             "risk_score": risk_score,
             "origin": geo.get("city", "Unknown") + ", " + geo.get("country", "Unknown"),
             "ip": client_ip,
-            "device": fingerprint.get("os", "Unknown"),
-            "status": "CHALLENGED",
-            "reason": "Medium risk anomaly detected. Verification code sent.",
-            "otp_code_demo": otp # Provided for demo/testing convenience
-        })
+            "device": dev_desc,
+            "status": "PENDING_APPROVAL",
+            "verification_code": otp,  # Code is on Primary Device screen!
+            "temp_token": temp_token,
+            "reason": f"MFA Challenge for incoming login from {geo.get('city', 'Unknown')}. Verification code: {otp}",
+            "factors": ml_eval["explainable_factors"]
+        }
+        db.get_collection("security_alerts").insert_one(alert_doc)
+
+        # Fire real Windows Desktop Toast Notification in the background!
+        send_desktop_notification(
+            title=f"🔐 Sign-In Request: Code {otp}",
+            message=f"Access requested from {geo.get('city', 'Unknown')} ({dev_desc}). Verification code: {otp}"
+        )
+        broadcaster.broadcast_sync(email, alert_doc)
         return {
             "status": "MFA_REQUIRED",
-            "message": "Unusual access pattern detected. Secondary MFA verification required.",
+            "action": "STEP_UP_MFA",
+            "message": "Unusual access pattern detected. Verification code has been sent to your Primary Device screen.",
             "risk_score": risk_score,
-            "temp_token": temp_token,
-            "demo_mfa_code": otp # Included so reviewer can test step-up instantly!
+            "temp_token": temp_token
         }
 
     # Scenario C: LOW RISK -> ALLOW & ISSUE ACTIVE SESSION
@@ -525,24 +700,37 @@ def login(payload: LoginSchema, request: Request):
     device_name = f"{browser_name} on {os_name}"
 
     prompt_primary_device = False
-    if not primary_device:
-        # First sign-in or no primary device enrolled -> prompt user to set as primary
+    session_expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+
+    is_dummy_seeded = bool(primary_device and primary_device.get("browser_id") == "chrome_uuid_legit_001")
+    has_confirmed = bool(user.get("has_confirmed_primary", False))
+    if not primary_device or is_dummy_seeded or not has_confirmed:
+        # First sign-in or unconfirmed primary device -> enroll current browser and prompt user to keep/confirm
         prompt_primary_device = True
         device_tier = "PRIMARY"
         is_primary = True
         device_label = f"Primary Security Portal ({device_name})"
+        session_expires_at = "2099-12-31T23:59:59Z"
+        primary_data = {
+            "browser_id": browser_id,
+            "browser": browser_name,
+            "os": os_name,
+            "canvas_hash": fingerprint.get("canvas_hash"),
+            "screen_resolution": fingerprint.get("screen_resolution"),
+            "label": device_label,
+            "registered_at": datetime.now(timezone.utc).isoformat()
+        }
+        db.users.update_one({"email": email}, {"$set": {"primary_device": primary_data, "has_confirmed_primary": False}})
+        user["primary_device"] = primary_data
+        primary_device = primary_data
     else:
         # Check if current hardware/browser profile matches the designated primary device
         primary_bid = primary_device.get("browser_id")
         matches_primary = False
 
-        if primary_bid:
-            # Strict browser instance verification:
-            # Every distinct browser on the same PC (e.g. Chrome vs Edge vs Firefox vs Chrome Incognito)
-            # has its own isolated localStorage and distinct browser_id.
-            matches_primary = bool(browser_id and primary_bid == browser_id)
+        if primary_bid and browser_id:
+            matches_primary = bool(primary_bid == browser_id)
         else:
-            # Legacy fallback only if browser_id was not recorded
             matches_primary = bool(
                 primary_device.get("canvas_hash") == fingerprint.get("canvas_hash")
                 and primary_device.get("browser") == browser_name
@@ -553,41 +741,86 @@ def login(payload: LoginSchema, request: Request):
             device_tier = "PRIMARY"
             is_primary = True
             device_label = f"Primary Security Portal ({device_name})"
+            # Primary device session is perpetual and never expires
+            session_expires_at = "2099-12-31T23:59:59Z"
         else:
-            device_tier = "SECONDARY"
-            is_primary = False
+            # Secondary device login: MUST BE APPROVED BY PRIMARY DEVICE!
+            otp = generate_mfa_code()
+            temp_token = generate_session_token()
+            now_iso = datetime.now(timezone.utc).isoformat()
             device_label = f"Secondary Device ({device_name})"
 
-            # Dispatch audit event to legitimate user's primary device
-            db.get_collection("security_alerts").insert_one({
-                "alert_id": f"alt_sec_{int(time.time()*1000)}",
+            db.users.update_one(
+                {"email": email},
+                {"$set": {
+                    "mfa_pending": {
+                        "code": otp,
+                        "temp_token": temp_token,
+                        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+                        "device": device_name,
+                        "device_label": device_label,
+                        "fingerprint": fingerprint,
+                        "ip": client_ip,
+                        "geo": geo,
+                        "approved": False,
+                        "created_at": now_iso
+                    }
+                }}
+            )
+
+            # High-priority alert sent directly to Primary Device with verification code & one-click approval
+            alert_id = f"alt_mfa_{int(time.time()*1000)}"
+            origin_str = geo.get("city", "Local") + ", " + geo.get("country", "Local")
+            alert_doc = {
+                "alert_id": alert_id,
                 "user_email": email,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "type": "SECONDARY_DEVICE_LOGIN",
-                "risk_score": 15.0,
-                "origin": geo.get("city", "Local") + ", " + geo.get("country", "Local"),
+                "created_at": now_iso,
+                "type": "SECONDARY_DEVICE_APPROVAL_REQUEST",
+                "risk_score": 30.0,
+                "origin": origin_str,
                 "ip": client_ip,
-                "device": device_label,
-                "status": "INFO",
-                "reason": f"ℹ️ Companion Device Sign-In: Account accessed with valid credentials from {device_label}.",
+                "device": device_name,
+                "status": "PENDING_APPROVAL",
+                "verification_code": otp,  # Code is on Primary Device screen!
+                "temp_token": temp_token,
+                "reason": f"Secondary device '{device_name}' from {geo.get('city', 'Local')} is requesting sign-in access. Verification code: {otp}",
                 "factors": [{
-                    "factor": "Secondary Device Authentication",
-                    "detail": f"Signed in from an authorized secondary device ({device_name}).",
-                    "weight": 15.0,
-                    "severity": "INFO"
+                    "factor": "Secondary Device Login Request",
+                    "detail": f"Device: {device_name} | Code: {otp} | IP: {client_ip}",
+                    "weight": 30.0,
+                    "severity": "MEDIUM"
                 }]
-            })
+            }
+            db.get_collection("security_alerts").insert_one(alert_doc)
+
+            # Fire real Windows Desktop Toast Notification in the background!
+            send_desktop_notification(
+                title=f"🔐 Sign-In Request: Code {otp}",
+                message=f"Secondary device '{device_name}' from {geo.get('city', 'Local')} is requesting sign-in access."
+            )
+
+            # Push live event via SSE to connected Primary Device (0ms latency!)
+            broadcaster.broadcast_sync(email, alert_doc)
+
             cloudwatch.put_log_event(
                 log_group="/aws/lambda/AuthHandler",
-                level="INFO",
-                message=f"Companion device login for {email} from {client_ip} ({device_label})"
+                level="WARN",
+                message=f"Secondary device login verification code {otp} dispatched to primary device for {email} ({device_name})"
             )
+
+            # Zero data about Primary Device leaked to Secondary Device!
+            return {
+                "status": "MFA_REQUIRED",
+                "action": "DEVICE_APPROVAL_REQUIRED",
+                "message": "Secondary device detected. Verification code has been sent to your Primary Device screen.",
+                "temp_token": temp_token,
+                "device_tier": "SECONDARY"
+            }
 
     rate_limiter.record_success(client_ip)
     rate_limiter.record_success(f"acct:{email}")
     session_token = generate_session_token()
     session_id = f"sess_{int(time.time()*1000)}"
-    expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
 
     session_doc = {
         "session_id": session_id,
@@ -600,7 +833,7 @@ def login(payload: LoginSchema, request: Request):
         "is_primary_device": is_primary,
         "fingerprint": fingerprint,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "expires_at": expires_at,
+        "expires_at": session_expires_at,
         "status": "ACTIVE"
     }
     db.active_sessions.insert_one(session_doc)
@@ -631,6 +864,8 @@ def login(payload: LoginSchema, request: Request):
             "email": user["email"],
             "full_name": user["full_name"],
             "status": user["status"],
+            "role": user.get("role", "ROOT_ADMIN"),
+            "is_root_admin": user.get("is_root_admin", True),
             "primary_device": user.get("primary_device"),
             "device_tier": device_tier,
             "is_primary_device": is_primary
@@ -658,30 +893,206 @@ def verify_mfa(payload: VerifyMFASchema):
         raise HTTPException(status_code=400, detail="Invalid verification code.")
 
     # MFA verified successfully: clear challenge and issue full session
-    rate_limiter.record_success(attempt.get("ip", "127.0.0.1"))
+    attempt = mfa_state.get("attempt", {})
+    client_ip = attempt.get("ip", "127.0.0.1")
+    geo = attempt.get("geo", {})
+    fp = attempt.get("fingerprint", {})
+    dev_name = f"{fp.get('browser', 'Browser')} on {fp.get('os', 'Verified Device')}"
+
+    rate_limiter.record_success(client_ip)
     rate_limiter.record_success(f"acct:{email}")
     db.users.update_one({"email": email}, {"$set": {"mfa_pending": None}})
     session_token = generate_session_token()
     session_id = f"sess_{int(time.time()*1000)}"
-    attempt = mfa_state.get("attempt", {})
+
+    has_primary = bool(user.get("primary_device"))
+    device_tier = "SECONDARY" if has_primary else "PRIMARY"
+    is_primary = False if has_primary else True
+    session_expires = "2099-12-31T23:59:59Z" if is_primary else (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    dev_label = mfa_state.get("device_label") or dev_name
 
     db.active_sessions.insert_one({
         "session_id": session_id,
         "session_token": session_token,
         "user_email": email,
-        "ip_address": attempt.get("ip", "127.0.0.1"),
-        "geo": attempt.get("geo", {}),
-        "device": attempt.get("fingerprint", {}).get("os", "Verified Device"),
+        "ip_address": client_ip,
+        "geo": geo,
+        "device": dev_label,
+        "device_tier": device_tier,
+        "is_primary_device": is_primary,
+        "fingerprint": fp,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+        "expires_at": session_expires,
         "status": "ACTIVE"
     })
+
+    # Resolve security alert
+    db.get_collection("security_alerts").update_one(
+        {"user_email": email, "temp_token": payload.temp_token},
+        {"$set": {"status": "RESOLVED_VERIFIED"}}
+    )
+
+    # Update user's last successful login
+    db.users.update_one(
+        {"email": email},
+        {"$set": {
+            "last_successful_login": {
+                "timestamp": time.time(),
+                "geo": geo,
+                "ip": client_ip,
+                "device": dev_label
+            }
+        }}
+    )
+
+    cloudwatch.put_log_event(
+        log_group="/aws/lambda/AuthHandler",
+        level="INFO",
+        message=f"MFA verified successfully for {email} on {dev_label} (Tier: {device_tier})"
+    )
 
     return {
         "status": "SUCCESS",
         "token": session_token,
-        "message": "Identity confirmed via Step-up MFA. Access granted."
+        "device_tier": device_tier,
+        "is_primary_device": is_primary,
+        "message": "Identity confirmed via Verification Code. Access granted."
     }
+
+
+@app.get("/api/auth/mfa-poll/{temp_token}")
+def poll_mfa_status(temp_token: str):
+    """Allows a waiting secondary device to check if the Primary Device approved its login."""
+    user = None
+    all_users = db.users.find({})
+    for u in all_users:
+        pending = u.get("mfa_pending")
+        if pending and pending.get("temp_token") == temp_token:
+            user = u
+            break
+
+    if not user or not user.get("mfa_pending"):
+        return {"status": "EXPIRED", "message": "Verification challenge expired or already handled."}
+
+    mfa_state = user["mfa_pending"]
+    if mfa_state.get("approved") == True:
+        email = user["email"]
+        fp = mfa_state.get("fingerprint", {})
+        client_ip = mfa_state.get("ip", "127.0.0.1")
+        geo = mfa_state.get("geo", {})
+        dev_label = mfa_state.get("device_label", "Secondary Device")
+
+        db.users.update_one({"email": email}, {"$set": {"mfa_pending": None}})
+        session_token = generate_session_token()
+        session_id = f"sess_{int(time.time()*1000)}"
+
+        has_primary = bool(user.get("primary_device"))
+        device_tier = "SECONDARY" if has_primary else "PRIMARY"
+        is_primary = False if has_primary else True
+        session_expires = "2099-12-31T23:59:59Z" if is_primary else (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+
+        db.active_sessions.insert_one({
+            "session_id": session_id,
+            "session_token": session_token,
+            "user_email": email,
+            "ip_address": client_ip,
+            "geo": geo,
+            "device": dev_label,
+            "device_tier": device_tier,
+            "is_primary_device": is_primary,
+            "fingerprint": fp,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": session_expires,
+            "status": "ACTIVE"
+        })
+
+        return {
+            "status": "APPROVED",
+            "token": session_token,
+            "device_tier": device_tier,
+            "is_primary_device": is_primary,
+            "user": {
+                "email": user["email"],
+                "full_name": user["full_name"],
+                "status": user["status"],
+                "role": user.get("role", "ROOT_ADMIN"),
+                "is_root_admin": user.get("is_root_admin", True),
+                "device_tier": device_tier,
+                "is_primary_device": is_primary
+            }
+        }
+
+    return {"status": "PENDING", "message": "Awaiting approval or verification code entry from Primary Device."}
+
+
+@app.post("/api/auth/devices/approve-secondary")
+def approve_secondary_device(payload: ApproveSecondarySchema, user: Dict[str, Any] = Depends(get_current_user)):
+    """Called by the Primary Device to grant one-click approval to a pending secondary device."""
+    mfa_pending = user.get("mfa_pending")
+    target_token = payload.temp_token
+    if mfa_pending:
+        if not target_token or target_token == "LATEST" or target_token == mfa_pending.get("temp_token"):
+            target_token = mfa_pending.get("temp_token")
+    if not mfa_pending and not target_token:
+        # Check if an alert has pending approval
+        pending_alert = db.get_collection("security_alerts").find_one({
+            "user_email": user["email"],
+            "type": "SECONDARY_DEVICE_APPROVAL_REQUEST",
+            "status": "PENDING_APPROVAL"
+        })
+        if not pending_alert:
+            raise HTTPException(status_code=400, detail="No matching pending secondary device request found.")
+        target_token = pending_alert.get("temp_token")
+
+    if payload.approved:
+        if mfa_pending:
+            mfa_pending["approved"] = True
+            db.users.update_one(
+                {"email": user["email"]},
+                {"$set": {"mfa_pending": mfa_pending}}
+            )
+        db.get_collection("security_alerts").update_many(
+            {"user_email": user["email"], "$or": [{"temp_token": target_token}, {"type": "SECONDARY_DEVICE_APPROVAL_REQUEST"}]},
+            {"$set": {"status": "RESOLVED_APPROVED"}}
+        )
+        cloudwatch.put_log_event(
+            log_group="/aws/lambda/AuthHandler",
+            level="INFO",
+            message=f"Primary device approved secondary sign-in for {user['email']}"
+        )
+        return {"status": "SUCCESS", "message": "Secondary device approved successfully."}
+    else:
+        db.users.update_one(
+            {"email": user["email"]},
+            {"$set": {"mfa_pending": None}}
+        )
+        db.get_collection("security_alerts").update_many(
+            {"user_email": user["email"], "$or": [{"temp_token": target_token}, {"type": "SECONDARY_DEVICE_APPROVAL_REQUEST"}]},
+            {"$set": {"status": "RESOLVED_DENIED"}}
+        )
+        cloudwatch.put_log_event(
+            log_group="/aws/lambda/AuthHandler",
+            level="WARN",
+            message=f"Primary device rejected secondary sign-in attempt for {user['email']}"
+        )
+        return {"status": "SUCCESS", "message": "Secondary device login request denied."}
+
+
+@app.post("/api/auth/unlock-self")
+def unlock_self(user: Dict[str, Any] = Depends(get_current_user)):
+    """Allows the authenticated Primary Device owner to unfreeze and restore their own account."""
+    email = user["email"]
+    db.users.update_one(
+        {"email": email},
+        {"$set": {"status": "ACTIVE", "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    rate_limiter.record_success(f"acct:{email}")
+    cloudwatch.put_log_event(
+        log_group="/aws/lambda/AuthHandler",
+        level="INFO",
+        message=f"Account {email} self-unlocked to ACTIVE status by owner on Primary Device."
+    )
+    return {"status": "SUCCESS", "message": "Account successfully unfrozen and restored to ACTIVE status."}
 
 
 @app.post("/api/auth/forgot-password")
@@ -771,12 +1182,16 @@ def get_me(authorization: Optional[str] = Header(None), user: Dict[str, Any] = D
         "email": user["email"],
         "full_name": user["full_name"],
         "status": user["status"],
+        "role": user.get("role", "ROOT_ADMIN"),
+        "is_root_admin": user.get("is_root_admin", True),
         "created_at": user["created_at"],
         "last_login": user.get("last_successful_login"),
         "trusted_devices_count": len(user.get("trusted_devices", [])),
-        "primary_device": user.get("primary_device"),
+        "primary_device": user.get("primary_device") if is_primary else None, # Zero primary device data given to secondary devices!
         "device_tier": device_tier,
-        "is_primary_device": is_primary
+        "is_primary_device": is_primary,
+        "secondary_password_configured": bool(user.get("secondary_password_hash")),
+        "account_is_frozen": bool(user.get("account_is_frozen") or user.get("status") == "LOCKED")
     }
 
 
@@ -786,6 +1201,45 @@ def set_primary_device(payload: SetPrimaryDeviceSchema, authorization: Optional[
     session = db.active_sessions.find_one({"session_token": token})
     if not session:
         raise HTTPException(status_code=401, detail="Active session not found.")
+
+    # Master Secondary Security Password verification when setting or transferring Primary Device:
+    current_primary = user.get("primary_device")
+    if payload.is_primary and current_primary:
+        # A secondary device attempting to take over primary authority MUST supply the Master Secondary Password!
+        if not session.get("is_primary_device"):
+            if not payload.secondary_password:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Master Secondary Security Password is required to transfer Primary Device authority."
+                )
+            sec_hash = user.get("secondary_password_hash")
+            sec_salt = user.get("secondary_password_salt")
+            verified = False
+            if sec_hash and sec_salt:
+                verified = verify_password(payload.secondary_password, sec_hash, sec_salt)
+            if not verified:
+                # Fallback check against account password
+                verified = verify_password(payload.secondary_password, user["password_hash"], user["salt"])
+            if not verified:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Incorrect Secondary Security Password. Primary Device transfer denied."
+                )
+        else:
+            # Primary device itself confirming: if secondary password supplied, verify it
+            if payload.secondary_password:
+                sec_hash = user.get("secondary_password_hash")
+                sec_salt = user.get("secondary_password_salt")
+                verified = False
+                if sec_hash and sec_salt:
+                    verified = verify_password(payload.secondary_password, sec_hash, sec_salt)
+                if not verified:
+                    verified = verify_password(payload.secondary_password, user["password_hash"], user["salt"])
+                if not verified:
+                    raise HTTPException(
+                        status_code=401,
+                        detail="Incorrect Secondary Security Password."
+                    )
 
     fp = session.get("fingerprint") or {}
     browser_name = fp.get("browser", "Browser")
@@ -802,13 +1256,26 @@ def set_primary_device(payload: SetPrimaryDeviceSchema, authorization: Optional[
             "label": device_label,
             "registered_at": datetime.now(timezone.utc).isoformat()
         }
-        db.users.update_one({"email": user["email"]}, {"$set": {"primary_device": primary_data}})
+        db.users.update_one({"email": user["email"]}, {"$set": {"primary_device": primary_data, "has_confirmed_primary": True}})
+        
+        # Demote all existing sessions to secondary
+        db.active_sessions.update_many(
+            {"user_email": user["email"]},
+            {"$set": {"device_tier": "SECONDARY", "is_primary_device": False}}
+        )
+        # Promote current session to perpetual Primary Device
         db.active_sessions.update_one(
             {"session_token": token},
-            {"$set": {"device_tier": "PRIMARY", "is_primary_device": True, "device": device_label}}
+            {"$set": {
+                "device_tier": "PRIMARY",
+                "is_primary_device": True,
+                "device": device_label,
+                "expires_at": "2099-12-31T23:59:59Z"
+            }}
         )
-        msg = "This device has been registered as your Primary Security Portal."
+        msg = f"Primary Device authority successfully saved for this device ({device_label})."
     else:
+        db.users.update_one({"email": user["email"]}, {"$set": {"has_confirmed_primary": True}})
         db.active_sessions.update_one(
             {"session_token": token},
             {"$set": {"device_tier": "SECONDARY", "is_primary_device": False, "device": f"Secondary Device ({browser_name} on {os_name})"}}
@@ -823,30 +1290,76 @@ def set_primary_device(payload: SetPrimaryDeviceSchema, authorization: Optional[
     return {"status": "SUCCESS", "message": msg, "device_tier": "PRIMARY" if payload.is_primary else "SECONDARY"}
 
 
+@app.post("/api/auth/secondary-password/update")
+def update_secondary_password(payload: UpdateSecondaryPasswordSchema, user: Dict[str, Any] = Depends(get_current_user)):
+    """Allows user to update their Master Secondary Security Password."""
+    valid = verify_password(payload.current_password, user["password_hash"], user["salt"])
+    if not valid and user.get("secondary_password_hash") and user.get("secondary_password_salt"):
+        valid = verify_password(payload.current_password, user["secondary_password_hash"], user["secondary_password_salt"])
+    
+    if not valid:
+        raise HTTPException(status_code=401, detail="Authentication failed: Incorrect current password.")
+    
+    new_hash, new_salt = hash_password(payload.new_secondary_password)
+    db.users.update_one(
+        {"email": user["email"]},
+        {"$set": {
+            "secondary_password_hash": new_hash,
+            "secondary_password_salt": new_salt,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    cloudwatch.put_log_event(
+        log_group="/aws/lambda/AuthHandler",
+        level="INFO",
+        message=f"Secondary Security Password rotated for {user['email']}"
+    )
+    return {"status": "SUCCESS", "message": "Master Secondary Security Password updated successfully."}
+
+
 @app.get("/api/auth/sessions")
 def list_sessions(authorization: Optional[str] = Header(None), user: Dict[str, Any] = Depends(get_current_user)):
     current_token = authorization.split(" ")[1] if authorization and authorization.startswith("Bearer ") else None
     current_session = db.active_sessions.find_one({"session_token": current_token}) if current_token else None
     current_id = current_session.get("session_id") if current_session else None
+    caller_is_secondary = bool(current_session and (current_session.get("device_tier") == "SECONDARY" or current_session.get("is_primary_device") is False))
 
     sessions = db.active_sessions.find({"user_email": user["email"]}, sort_key="created_at", reverse=True)
     clean_sessions = []
     for s in sessions:
         is_current = (s.get("session_id") == current_id)
-        device_tier = s.get("device_tier", "PRIMARY" if is_current else "SECONDARY")
-        clean_sessions.append({
-            "session_id": s.get("session_id"),
-            "ip_address": s.get("ip_address"),
-            "geo": s.get("geo"),
-            "device": s.get("device"),
-            "device_tier": device_tier,
-            "is_primary_device": (device_tier == "PRIMARY"),
-            "created_at": s.get("created_at"),
-            "expires_at": s.get("expires_at"),
-            "status": s.get("status"),
-            "is_current": is_current,
-            "is_primary": is_current
-        })
+        s_device_tier = s.get("device_tier", "PRIMARY" if s.get("is_primary_device") else "SECONDARY")
+        s_is_primary = (s_device_tier == "PRIMARY" or s.get("is_primary_device") is True)
+
+        if caller_is_secondary and s_is_primary:
+            # Secondary device sees ZERO data about primary device hardware, IP, or location!
+            clean_sessions.append({
+                "session_id": s.get("session_id"),
+                "ip_address": "•••.•••.•••.•• (Protected)",
+                "geo": {"city": "Protected Location", "country": "US"},
+                "device": "Primary Security Device (Protected)",
+                "device_tier": "PRIMARY",
+                "is_primary_device": True,
+                "created_at": s.get("created_at"),
+                "expires_at": s.get("expires_at"),
+                "status": s.get("status"),
+                "is_current": is_current,
+                "is_primary": True
+            })
+        else:
+            clean_sessions.append({
+                "session_id": s.get("session_id"),
+                "ip_address": s.get("ip_address"),
+                "geo": s.get("geo"),
+                "device": s.get("device"),
+                "device_tier": s_device_tier,
+                "is_primary_device": s_is_primary,
+                "created_at": s.get("created_at"),
+                "expires_at": s.get("expires_at"),
+                "status": s.get("status"),
+                "is_current": is_current,
+                "is_primary": s_is_primary
+            })
     return {"sessions": clean_sessions, "current_session_id": current_id}
 
 
@@ -862,12 +1375,12 @@ def kill_session(payload: SessionKillSchema, authorization: Optional[str] = Head
         raise HTTPException(status_code=404, detail="Session not found or already terminated.")
 
     # PRIMARY PORTAL IMMUNITY:
-    # A session with device_tier == "PRIMARY" can NEVER be killed by another session or secondary device!
+    # A session with device_tier == "PRIMARY" is perpetual and can NEVER be revoked!
     is_target_primary = (target.get("device_tier") == "PRIMARY" or target.get("is_primary_device") is True)
     if is_target_primary and not is_killing_self:
         raise HTTPException(
             status_code=403,
-            detail="Security Policy Restriction: The Primary Security Portal session is protected and cannot be terminated from another session or device."
+            detail="Security Policy Restriction: The Primary Security Portal session is permanent and cannot be remotely terminated."
         )
 
     # Secondary Device Restriction: Secondary sessions cannot terminate other sessions
@@ -943,25 +1456,26 @@ def lock_account(authorization: Optional[str] = Header(None), user: Dict[str, An
         )
 
     email = user["email"]
-    # Freeze account and kill all active sessions
+    # Freeze account and kill all remote secondary sessions, preserving primary device session!
     db.users.update_one({"email": email}, {"$set": {"status": "LOCKED"}})
-    db.active_sessions.delete_many({"user_email": email})
+    db.active_sessions.delete_many({"user_email": email, "is_primary_device": {"$ne": True}})
 
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
         level="WARN",
-        message=f"Emergency Lockout activated by user {email}"
+        message=f"Emergency Lockout activated by user {email}. Primary device session preserved."
     )
-    return {"status": "SUCCESS", "message": "Account successfully frozen. All active sessions have been terminated."}
+    return {"status": "SUCCESS", "message": "Account successfully frozen. Remote secondary sessions terminated. Your primary device remains active."}
 
 
 @app.post("/api/auth/delete-account")
 def delete_account(payload: AccountDeleteSchema, user: Dict[str, Any] = Depends(get_current_user)):
+    email = user["email"]
+
     # Verify password before irreversible deletion
     if not verify_password(payload.password, user["password_hash"], user["salt"]):
         raise HTTPException(status_code=401, detail="Incorrect password. Account deletion aborted.")
 
-    email = user["email"]
     db.users.delete_one({"email": email})
     db.active_sessions.delete_many({"user_email": email})
     db.security_events.delete_many({"user_email": email})
@@ -976,8 +1490,27 @@ def delete_account(payload: AccountDeleteSchema, user: Dict[str, Any] = Depends(
 
 
 @app.get("/api/security/user-alerts")
-def get_user_alerts(user: Dict[str, Any] = Depends(get_current_user)):
-    alerts = db.get_collection("security_alerts").find({"user_email": user["email"]}, sort_key="created_at", reverse=True, limit=20)
+def get_user_alerts(authorization: Optional[str] = Header(None), user: Dict[str, Any] = Depends(get_current_user)):
+    current_token = authorization.split(" ")[1] if authorization and authorization.startswith("Bearer ") else None
+    current_session = db.active_sessions.find_one({"session_token": current_token}) if current_token else None
+    is_primary = current_session.get("is_primary_device", True) if current_session else True
+
+    query = {"user_email": user["email"]}
+    alerts = db.get_collection("security_alerts").find(query, sort_key="created_at", reverse=True, limit=20)
+    
+    if not is_primary:
+        # Secondary devices must NEVER receive approval requests, verification codes, or tokens!
+        filtered_alerts = []
+        for a in alerts:
+            a_type = a.get("type", "")
+            if a_type in ("SECONDARY_DEVICE_APPROVAL_REQUEST", "DEVICE_APPROVAL_REQUIRED") or a.get("verification_code"):
+                continue
+            clean_a = dict(a)
+            if "temp_token" in clean_a:
+                del clean_a["temp_token"]
+            filtered_alerts.append(clean_a)
+        return {"alerts": filtered_alerts}
+
     return {"alerts": alerts}
 
 
@@ -995,18 +1528,71 @@ def dismiss_all_user_alerts(user: Dict[str, Any] = Depends(get_current_user)):
     return {"status": "SUCCESS", "message": "All alerts cleared."}
 
 
+@app.get("/api/security/stream")
+async def security_event_stream(request: Request, authorization: Optional[str] = Header(None)):
+    """
+    Live Server-Sent Events (SSE) stream for Primary Device.
+    Delivers instant 0ms background notifications when secondary devices request sign-in.
+    """
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+    if not token:
+        token = request.query_params.get("token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication token required.")
+
+    session = db.active_sessions.find_one({"session_token": token})
+    if not session or session.get("status") != "ACTIVE":
+        raise HTTPException(status_code=401, detail="Active session required.")
+
+    email = session.get("user_email")
+    is_primary = bool(session.get("is_primary_device") or session.get("device_tier") == "PRIMARY")
+    if not is_primary:
+        raise HTTPException(status_code=403, detail="SSE real-time stream is reserved for Primary Devices.")
+
+    q = broadcaster.subscribe(email)
+
+    async def event_stream():
+        try:
+            # Initial connection ping
+            yield f": connected\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=12.0)
+                    yield f"event: alert\ndata: {json.dumps(event, default=str)}\n\n"
+                except asyncio.TimeoutError:
+                    yield f": keepalive\n\n"
+        finally:
+            broadcaster.unsubscribe(email, q)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
 # -------------------------------------------------------------
 # Red Team Attack Simulator & Blue Team SOC Endpoints
 # -------------------------------------------------------------
 class SimulateAttackSchema(BaseModel):
     target_email: str = Field(min_length=3, max_length=254)
-    attack_type: str # "IMPOSSIBLE_TRAVEL", "CREDENTIAL_STUFFING", "BRUTE_FORCE", "DEVICE_SPOOF"
+    attack_type: Optional[str] = None # "IMPOSSIBLE_TRAVEL", "CREDENTIAL_STUFFING", "BRUTE_FORCE", "DEVICE_SPOOF"
+    scenario_id: Optional[str] = None
     speed_kmh: Optional[float] = None
     custom_ip: Optional[str] = None
     custom_city: Optional[str] = None
     custom_country: Optional[str] = None
 
 @app.post("/api/security/simulate-attack")
+@app.post("/api/security/simulate-scenario")
 def simulate_attack(payload: SimulateAttackSchema):
     email = sanitize_email(payload.target_email)
     user = db.users.find_one({"email": email})
@@ -1014,7 +1600,8 @@ def simulate_attack(payload: SimulateAttackSchema):
     # Base coordinates
     last_loc = user.get("last_successful_login", {}).get("geo", {"lat": 40.7128, "lon": -74.0060, "city": "New York", "country": "US"}) if user else {"lat": 40.7128, "lon": -74.0060, "city": "New York", "country": "US"}
 
-    attack_type = payload.attack_type.upper()
+    raw_type = payload.attack_type or payload.scenario_id or "IMPOSSIBLE_TRAVEL"
+    attack_type = raw_type.upper()
     simulated_geo = {}
     simulated_ip = "127.0.0.1"
     simulated_fp = {}
@@ -1110,7 +1697,7 @@ def simulate_attack(payload: SimulateAttackSchema):
 
     # If action is BLOCK or STEP_UP, inject alert into user's alert inbox
     if action in ("BLOCK_SESSION", "STEP_UP_MFA"):
-        db.get_collection("security_alerts").insert_one({
+        sim_alert = {
             "alert_id": f"alt_sim_{int(time.time()*1000)}",
             "user_email": email,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -1122,7 +1709,9 @@ def simulate_attack(payload: SimulateAttackSchema):
             "status": "UNRESOLVED",
             "reason": f"Simulated {attack_type} detected by ML Engine.",
             "factors": ml_res["explainable_factors"]
-        })
+        }
+        db.get_collection("security_alerts").insert_one(sim_alert)
+        broadcaster.broadcast_sync(email, sim_alert)
 
     return {
         "status": "SIMULATION_COMPLETE",
@@ -1181,7 +1770,7 @@ def get_cloudwatch_telemetry():
 def system_status():
     dep_mode = os.getenv("DEPLOYMENT_MODE", "STANDALONE_LOCAL")
     return {
-        "status": "HEALTHY",
+        "status": "SERVICE_UNDER_MAINTENANCE" if MAINTENANCE_MODE else "HEALTHY",
         "service": "AWSSecurity AI Cyber Defense Engine",
         "version": "2.1.0",
         "deployment_mode": dep_mode,
@@ -1189,6 +1778,7 @@ def system_status():
         "database_backend": "MongoDB Live Cluster" if db.use_mongo else "Embedded Local Document Store",
         "telemetry_engine": "Amazon CloudWatch" if dep_mode.upper() == "AWS" else "Embedded Local SIEM / Telemetry",
         "maintenance_mode": MAINTENANCE_MODE,
+        "message": "Service Under Maintenance" if MAINTENANCE_MODE else "Service Operational",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
@@ -1196,7 +1786,16 @@ def system_status():
 def toggle_maintenance(enable: bool):
     global MAINTENANCE_MODE
     MAINTENANCE_MODE = enable
-    return {"maintenance_mode": MAINTENANCE_MODE}
+    cloudwatch.put_log_event(
+        log_group="/aws/lambda/AuthHandler",
+        level="WARN" if enable else "INFO",
+        message=f"[System Governance] Maintenance mode set to {enable} by Root Administrator"
+    )
+    return {
+        "status": "SUCCESS",
+        "maintenance_mode": MAINTENANCE_MODE,
+        "message": "Service Under Maintenance" if MAINTENANCE_MODE else "Service Operational"
+    }
 
 
 # -------------------------------------------------------------
@@ -1208,17 +1807,53 @@ def cms_get_users():
     safe_users = []
     for u in users:
         u.pop("password_hash", None)
+        u.pop("salt", None)
         u.pop("mfa_secret", None)
+        u.pop("mfa_pending", None)
+        u["role"] = u.get("role", "ROOT_ADMIN")
+        u["is_root_admin"] = u.get("is_root_admin", True)
+        u["mfa_enabled"] = u.get("mfa_enabled", True)
         safe_users.append(u)
     return safe_users
 
+@app.post("/api/cms/users/{email}/unlock")
+def cms_unlock_user(email: str):
+    clean_email = sanitize_email(email)
+    user = db.users.find_one({"email": clean_email})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    db.users.update_one(
+        {"email": clean_email},
+        {"$set": {"status": "ACTIVE", "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    rate_limiter.record_success(f"acct:{clean_email}")
+
+    cloudwatch.put_log_event(
+        log_group="/aws/lambda/AuthHandler",
+        level="INFO",
+        message=f"[CMS Admin] Account {clean_email} was unlocked by administrator."
+    )
+    return {"status": "SUCCESS", "message": f"Account {clean_email} successfully unlocked and restored to ACTIVE status."}
+
 @app.delete("/api/cms/users/{email}")
 def cms_delete_user(email: str):
-    success = db.users.delete_one({"email": email})
-    db.active_sessions.delete_many({"email": email})
-    if success:
-        return {"message": f"User {email} deleted successfully"}
-    raise HTTPException(status_code=404, detail="User not found")
+    clean_email = sanitize_email(email)
+    user = db.users.find_one({"email": clean_email})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    success = db.users.delete_one({"email": clean_email})
+    db.active_sessions.delete_many({"user_email": clean_email})
+    db.get_collection("security_alerts").delete_many({"user_email": clean_email})
+    db.password_resets.delete_many({"email": clean_email})
+
+    cloudwatch.put_log_event(
+        log_group="/aws/lambda/AuthHandler",
+        level="WARN",
+        message=f"[CMS Admin] User account {clean_email} and all active sessions were purged."
+    )
+    return {"status": "SUCCESS", "message": f"User {clean_email} and all active sessions deleted successfully."}
 
 @app.get("/api/cms/stats")
 def cms_get_stats():
@@ -1252,7 +1887,11 @@ def serve_spa(full_path: str):
     # Default to index.html
     index_file = os.path.join(FRONTEND_DIR, "index.html")
     if os.path.exists(index_file):
-        return FileResponse(index_file)
+        response = FileResponse(index_file)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
     return JSONResponse({"message": "Frontend index.html not yet built."}, status_code=404)
 
 if __name__ == "__main__":

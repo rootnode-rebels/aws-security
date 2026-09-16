@@ -69,16 +69,18 @@ def test_primary_device_full_flow():
     token1 = data1["token"]
     headers1 = {"Authorization": f"Bearer {token1}"}
 
-    print(f"[Step 2] Browser 1 login -> prompt_primary_device: {data1.get('prompt_primary_device')}")
-    assert data1.get("prompt_primary_device") is True, "First login should prompt for primary device!"
+    print(f"[Step 2] Browser 1 login -> device_tier: {data1.get('device_tier')}, is_primary: {data1.get('is_primary_device')}")
+    assert data1.get("device_tier") == "PRIMARY"
+    assert data1.get("is_primary_device") is True
 
-    # 3. Designate Browser 1 as Primary Device
+    # 3. Designate / Update Browser 1 as Primary Device with Secondary Password
     set_prim_resp = client.post("/api/auth/devices/set-primary", headers=headers1, json={
         "is_primary": True,
-        "device_label": "Primary Security Portal (Chrome on Windows)"
+        "device_label": "Primary Security Portal (Chrome on Windows)",
+        "secondary_password": "MasterKey#2026"
     })
     assert set_prim_resp.status_code == 200, f"Set primary failed: {set_prim_resp.text}"
-    print(f"[Step 3] Designated Browser 1 as primary device: {set_prim_resp.json()['message']}")
+    print(f"[Step 3] Verified Browser 1 as primary device: {set_prim_resp.json()['message']}")
 
     # Verify user profile reflects primary device
     me1 = client.get("/api/auth/me", headers=headers1).json()
@@ -87,7 +89,7 @@ def test_primary_device_full_flow():
     assert me1.get("is_primary_device") is True
     print(f"  -> Profile verified: device_tier={me1['device_tier']}, is_primary_device={me1['is_primary_device']}")
 
-    # 4. Same machine, same browser (Chrome Incognito / diff profile with identical canvas_hash) -> Must be Secondary Device!
+    # 4. Same machine, different browser instance -> Cross-Device MFA Challenge dispatched to Primary Device!
     print("\n[Step 4] Logging into Browser 2 (Same PC, Chrome Incognito with same canvas_hash)...")
     login2_resp = client.post("/api/auth/login", json={
         "email": test_email,
@@ -103,23 +105,28 @@ def test_primary_device_full_flow():
     })
     assert login2_resp.status_code == 200, f"Login 2 failed: {login2_resp.text}"
     data2 = login2_resp.json()
-    token2 = data2["token"]
-    headers2 = {"Authorization": f"Bearer {token2}"}
+    assert data2.get("status") == "MFA_REQUIRED", "Secondary device sign-in must trigger MFA challenge!"
+    temp_token = data2["temp_token"]
+    print(f"  -> Browser 2 received MFA challenge (temp_token: {temp_token})")
 
-    print(f"  -> Browser 2 prompt_primary_device: {data2.get('prompt_primary_device')}")
-    print(f"  -> Browser 2 device_tier: {data2.get('device_tier')}")
-    print(f"  -> Browser 2 is_primary_device: {data2.get('is_primary_device')}")
-    assert data2.get("prompt_primary_device") is False, "Browser 2 should not prompt for primary device"
-    assert data2.get("device_tier") == "SECONDARY", "Browser 2 should be tagged as SECONDARY device"
-    assert data2.get("is_primary_device") is False
-
-    # 5. Check that Browser 1 received an instant alert about the secondary device login
+    # 5. Primary Device (Browser 1) receives approval request with verification code
     alerts_b1 = client.get("/api/security/user-alerts", headers=headers1).json()["alerts"]
-    print(f"[Step 5] Browser 1 alerts received: {len(alerts_b1)}")
-    assert len(alerts_b1) >= 1, "Alert for secondary device login was not created!"
-    sec_alert = next((a for a in alerts_b1 if a.get("type") == "SECONDARY_DEVICE_LOGIN"), None)
-    assert sec_alert is not None, "SECONDARY_DEVICE_LOGIN alert missing!"
-    print(f"  -> Alert found: {sec_alert['reason']}")
+    sec_alert = next((a for a in alerts_b1 if a.get("type") == "SECONDARY_DEVICE_APPROVAL_REQUEST" and a.get("temp_token") == temp_token), None)
+    assert sec_alert is not None, "SECONDARY_DEVICE_APPROVAL_REQUEST alert missing on Primary Device!"
+    print(f"[Step 5] Primary Device received approval alert! Verification Code: {sec_alert['verification_code']}")
+
+    # Browser 1 approves secondary device
+    approve_res = client.post("/api/auth/devices/approve-secondary", headers=headers1, json={
+        "temp_token": temp_token,
+        "approved": True
+    })
+    assert approve_res.status_code == 200
+
+    # Browser 2 polling succeeds and obtains session token
+    poll_res = client.get(f"/api/auth/mfa-poll/{temp_token}").json()
+    assert poll_res.get("status") == "APPROVED"
+    token2 = poll_res["token"]
+    headers2 = {"Authorization": f"Bearer {token2}"}
 
     # 6. Secondary Device (Browser 2) attempts to terminate Primary Session -> Must be 403 Forbidden!
     sessions_b2 = client.get("/api/auth/sessions", headers=headers2).json()["sessions"]

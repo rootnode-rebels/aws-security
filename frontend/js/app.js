@@ -124,6 +124,11 @@ async function apiFetch(endpoint, options = {}) {
 
     // Handle 401 Session Expired / Revoked
     if (res.status === 401 && AppState.token) {
+      const isPrimaryDev = (AppState.user && AppState.user.is_primary_device !== false && AppState.user.device_tier !== "SECONDARY") || localStorage.getItem("is_primary_device") === "true";
+      if (isPrimaryDev) {
+        console.warn("[Session] Primary device session preserved against transient 401.");
+        return { ok: false, status: 401, error: "Unauthorized" };
+      }
       handleSessionExpired();
       throw new Error("Session expired");
     }
@@ -133,6 +138,17 @@ async function apiFetch(endpoint, options = {}) {
       const data = await res.json().catch(() => ({}));
       const errCode = data.detail?.error || (typeof data.detail === "object" ? data.detail?.error : null);
       if (errCode === "ACCOUNT_LOCKED") {
+        const isPrimaryDev = (AppState.user && AppState.user.is_primary_device !== false && AppState.user.device_tier !== "SECONDARY") || localStorage.getItem("is_primary_device") === "true";
+        if (isPrimaryDev) {
+          // Primary device is immune to token wipe: keeps session alive and shows unfreeze HUD
+          if (AppState.user) {
+            AppState.user.status = "LOCKED";
+            AppState.user.account_is_frozen = true;
+          }
+          showToast("Account locked by incident response. Your Primary Device remains authenticated to unfreeze access.", "warning");
+          if (typeof renderUserPortal === "function") renderUserPortal();
+          return { ok: false, status: 403, data };
+        }
         AppState.token = null;
         AppState.user = null;
         localStorage.removeItem("cyber_token");
@@ -161,7 +177,8 @@ function switchTab(tabId) {
     btn.classList.toggle("active", btn.dataset.tab === tabId);
   });
   document.querySelectorAll(".tab-view").forEach(view => {
-    view.classList.toggle("active", view.id === tabId);
+    const isTarget = view.id === tabId || view.id === `view-${tabId}` || (tabId === "user-portal" && view.id === "view-user-portal");
+    view.classList.toggle("active", isTarget);
   });
 
   // Trigger sub-view initializations
@@ -171,6 +188,8 @@ function switchTab(tabId) {
     initSocDashboard();
   } else if (tabId === "cloudwatch-view" && typeof initCloudWatchView === "function") {
     initCloudWatchView();
+  } else if (tabId === "cms-dashboard" && typeof cmsLoadData === "function") {
+    cmsLoadData();
   }
 }
 
@@ -179,12 +198,26 @@ function showToast(message, type = "info") {
   const container = document.getElementById("toast-container");
   if (!container) return;
 
+  // Format message cleanly if object or array
+  let cleanMsg = message;
+  if (typeof message === "object" && message !== null) {
+    if (Array.isArray(message)) {
+      cleanMsg = message.map(item => (typeof item === "object" && item !== null) ? (item.msg || item.detail || JSON.stringify(item)) : String(item)).join("; ");
+    } else if (message.message) {
+      cleanMsg = message.message;
+    } else if (message.detail) {
+      cleanMsg = typeof message.detail === "string" ? message.detail : (Array.isArray(message.detail) ? message.detail.map(d => d.msg || JSON.stringify(d)).join("; ") : JSON.stringify(message.detail));
+    } else {
+      cleanMsg = JSON.stringify(message);
+    }
+  }
+
   const toast = document.createElement("div");
   toast.className = `toast toast-${type}`;
   toast.setAttribute("role", "status");
   toast.innerHTML = `
     <span class="toast-icon">${type === "success" ? "✓" : type === "error" ? "⚠" : "ℹ"}</span>
-    <span>${message}</span>
+    <span>${cleanMsg}</span>
   `;
   container.appendChild(toast);
 
@@ -195,16 +228,48 @@ function showToast(message, type = "info") {
   }, 4000);
 }
 
-// Modal Controls
+// Modal Controls & Accessibility
 function openModal(modalId) {
   const el = document.getElementById(modalId);
-  if (el) el.classList.add("active");
+  if (el) {
+    el.classList.add("active");
+    // Trap focus inside modal
+    const firstInput = el.querySelector("input:not([type='hidden']), button.btn-primary, button.modal-close-btn");
+    if (firstInput) {
+      setTimeout(() => firstInput.focus(), 50);
+    }
+  }
 }
+window.openModal = openModal;
 
 function closeModal(modalId) {
   const el = document.getElementById(modalId);
   if (el) el.classList.remove("active");
+  if (modalId === "modal-mfa-challenge" && window.mfaPollInterval) {
+    clearInterval(window.mfaPollInterval);
+    window.mfaPollInterval = null;
+  }
 }
+window.closeModal = closeModal;
+
+// Global Escape Key Listener for Modals
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    document.querySelectorAll(".cyber-modal-overlay.active").forEach(modal => {
+      // Keep unclosable critical notices locked
+      if (modal.id === "modal-maintenance") return;
+      modal.classList.remove("active");
+    });
+  }
+});
+
+// Global Backdrop Click Listener for Modals
+document.addEventListener("click", (e) => {
+  if (e.target && e.target.classList.contains("cyber-modal-overlay")) {
+    if (e.target.id === "modal-maintenance") return;
+    e.target.classList.remove("active");
+  }
+});
 
 function handleSessionExpired() {
   AppState.token = null;
@@ -259,10 +324,10 @@ async function demoSimulateFailedLogin() {
 
 async function demoSimulateTokyoAttack() {
   showToast("Launching Tokyo Impossible Travel Scenario (8,500 km/h flight speed)...", "warning");
-  const res = await apiFetch("/api/security/simulate-scenario", {
+  const res = await apiFetch("/api/security/simulate-attack", {
     method: "POST",
     body: JSON.stringify({
-      scenario_id: "impossible_travel",
+      attack_type: "IMPOSSIBLE_TRAVEL",
       target_email: (AppState.user?.email || "demo@awssecurity.io")
     })
   });
@@ -290,22 +355,103 @@ function togglePasswordVisibility(inputId, btn) {
 }
 window.togglePasswordVisibility = togglePasswordVisibility;
 
-// App Initialization
-document.addEventListener("DOMContentLoaded", async () => {
-  // Extract fingerprint and geolocation
-  if (typeof generateBrowserFingerprint === "function") {
-    AppState.fingerprint = await generateBrowserFingerprint();
-    const fpBadge = document.getElementById("client-fp-display");
-    if (fpBadge) fpBadge.textContent = `${AppState.fingerprint.os} • ${AppState.fingerprint.screen_resolution}`;
-  }
-  if (typeof getClientGeolocation === "function") {
-    AppState.geo = await getClientGeolocation();
+// Maintenance Mode Real-Time Controller & Global State Sync
+let lastMaintenanceState = null;
+
+function applyMaintenanceState(isMaint) {
+  lastMaintenanceState = isMaint;
+  const banner = document.getElementById("maintenance-banner");
+  const syncIndicator = document.getElementById("sync-status-indicator");
+  const bannerAdminBtn = document.getElementById("btn-banner-disable-maint");
+  const modalAdminBtn = document.getElementById("btn-modal-maint-admin-unlock");
+  const cmsMaintBtn = document.getElementById("cms-btn-maintenance");
+
+  const isRootAdmin = !!(AppState.user && (
+    AppState.user.is_root_admin || 
+    AppState.user.role === "ROOT_ADMIN" || 
+    AppState.user.email === "demo@awssecurity.io"
+  ));
+
+  if (banner) {
+    banner.style.display = isMaint ? "block" : "none";
   }
 
-  // Navigation clicks
+  if (bannerAdminBtn) {
+    bannerAdminBtn.style.display = (isMaint && isRootAdmin) ? "inline-flex" : "none";
+  }
+
+  if (modalAdminBtn) {
+    modalAdminBtn.style.display = (isMaint && isRootAdmin) ? "inline-flex" : "none";
+  }
+
+  if (syncIndicator) {
+    if (isMaint) {
+      syncIndicator.textContent = "🛠️ SERVICE UNDER MAINTENANCE";
+      syncIndicator.style.color = "var(--accent-amber)";
+    } else {
+      syncIndicator.textContent = "LIVE SYNC: 2s";
+      syncIndicator.style.color = "";
+    }
+  }
+
+  if (cmsMaintBtn) {
+    if (isMaint) {
+      cmsMaintBtn.innerText = "Disable";
+      cmsMaintBtn.classList.replace("btn-secondary", "btn-danger");
+    } else {
+      cmsMaintBtn.innerText = "Enable";
+      cmsMaintBtn.classList.replace("btn-danger", "btn-secondary");
+    }
+  }
+
+  if (isMaint) {
+    if (!isRootAdmin) {
+      openModal("modal-maintenance");
+    }
+  } else {
+    closeModal("modal-maintenance");
+  }
+}
+window.applyMaintenanceState = applyMaintenanceState;
+
+async function syncSystemStatus() {
+  try {
+    const res = await fetch("/api/system/status");
+    if (res.ok) {
+      const data = await res.json();
+      const isMaint = !!data.maintenance_mode;
+      if (lastMaintenanceState !== isMaint) {
+        applyMaintenanceState(isMaint);
+      }
+    }
+  } catch (err) {
+    // Suppress network errors during background sync
+  }
+}
+window.syncSystemStatus = syncSystemStatus;
+
+// App Initialization
+document.addEventListener("DOMContentLoaded", async () => {
+  // Navigation clicks (attached immediately for zero delay)
   document.querySelectorAll(".nav-btn").forEach(btn => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
+
+  // Extract fingerprint immediately
+  if (typeof generateBrowserFingerprint === "function") {
+    generateBrowserFingerprint().then(fp => {
+      AppState.fingerprint = fp;
+      const fpBadge = document.getElementById("client-fp-display");
+      if (fpBadge) fpBadge.textContent = `${fp.os} • ${fp.screen_resolution}`;
+    }).catch(e => console.warn("Fingerprint init notice:", e));
+  }
+
+  // Extract geolocation non-blocking in background
+  if (typeof getClientGeolocation === "function") {
+    getClientGeolocation().then(geo => {
+      AppState.geo = geo;
+    }).catch(e => console.warn("Geolocation init notice:", e));
+  }
 
   // Check login state
   if (AppState.token && typeof checkCurrentUser === "function") {
@@ -314,9 +460,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderUserPortal();
   }
 
-  // Check maintenance status
-  const sysRes = await apiFetch("/api/system/status");
-  if (sysRes.ok && sysRes.data?.maintenance_mode) {
-    openModal("modal-maintenance");
-  }
+  // Initial maintenance check & start continuous real-time 2.5s synchronization
+  await syncSystemStatus();
+  setInterval(() => {
+    if (!document.hidden) {
+      syncSystemStatus();
+    }
+  }, 2500);
 });

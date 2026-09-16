@@ -192,6 +192,45 @@ class TestAccountHijackSystem(unittest.TestCase):
         self.assertFalse(is_locked_after)
         print("[TEST] Advanced Security Hardening (Anti-Injection & Dual Rate Limiting): PASSED")
 
+    def test_08_atomic_persistence_and_operators(self):
+        """Validates MongoDB query operators ($ne, $in, $gt, etc.) in LocalCollection."""
+        test_col = db.get_collection("test_operator_col")
+        test_col.delete_many({})
+
+        test_col.insert_one({"name": "Alpha", "risk": 15, "role": "USER"})
+        test_col.insert_one({"name": "Beta", "risk": 75, "role": "ADMIN"})
+        test_col.insert_one({"name": "Gamma", "risk": 95, "role": "ATTACKER"})
+
+        # $gt
+        high_risk = test_col.find({"risk": {"$gt": 50}})
+        self.assertEqual(len(high_risk), 2)
+
+        # $ne
+        non_admin = test_col.find({"role": {"$ne": "ADMIN"}})
+        self.assertEqual(len(non_admin), 2)
+
+        # $in
+        selected = test_col.find({"role": {"$in": ["USER", "ATTACKER"]}})
+        self.assertEqual(len(selected), 2)
+
+        # Cleanup
+        test_col.delete_many({})
+        print("[TEST] MongoDB Query Operators ($gt, $ne, $in): PASSED")
+
+    def test_09_rate_limiter_pruning(self):
+        """Validates that RateLimiter automatically prunes old entries to prevent memory leaks."""
+        import time
+        ip = "192.0.2.100"
+        rate_limiter.failures[ip] = [time.time() - 1000] # stale timestamp
+        rate_limiter.lockouts[ip] = time.time() - 10 # expired lockout
+
+        # Trigger pruning
+        rate_limiter._prune_stale_records(time.time())
+        self.assertNotIn(ip, rate_limiter.failures)
+        self.assertNotIn(ip, rate_limiter.lockouts)
+        print("[TEST] Rate Limiter Memory Pruning & DoS Mitigation: PASSED")
+
 if __name__ == "__main__":
     unittest.main()
+
 

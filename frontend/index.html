@@ -111,13 +111,33 @@
     </div>
   </aside>
 
+  <!-- Persistent Global Maintenance Mode Banner -->
+  <aside id="maintenance-banner" class="emergency-alert-banner" style="display: none; background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.6);" role="alert" aria-live="assertive">
+    <div class="banner-inner">
+      <div class="banner-icon-pulse" style="font-size: 1.6rem; filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.6));">🛠️</div>
+      <div class="banner-content">
+        <div class="banner-title" style="color: var(--accent-amber); font-weight: 700; font-family: var(--font-mono);">
+          SYSTEM STATUS: SERVICE UNDER MAINTENANCE
+        </div>
+        <div class="banner-desc" style="color: var(--text-secondary); font-size: 0.82rem;">
+          Platform security updates and machine learning model retraining in progress. Non-administrative features are paused.
+        </div>
+      </div>
+      <div class="banner-actions">
+        <button class="btn btn-warning btn-sm" id="btn-banner-disable-maint" onclick="cmsToggleMaintenance()" style="display: none;" title="Root Admin override to resume normal service">
+          👑 Disable Maintenance (Admin)
+        </button>
+      </div>
+    </div>
+  </aside>
+
   <!-- Main Content Container -->
   <main id="main-content" class="main-wrapper" role="main">
 
     <!-- ============================================================= -->
     <!-- VIEW 1: LEGITIMATE USER PORTAL (PRIMARY & ACTIVE SESSIONS)    -->
     <!-- ============================================================= -->
-    <section id="view-user-portal" class="tab-view active" aria-labelledby="portal-heading">
+    <section id="user-portal" class="tab-view active" aria-labelledby="portal-heading">
 
       <!-- UNAUTHENTICATED: CLEAN MODERN LOGIN / REGISTRATION CARD -->
       <div id="portal-auth-container" class="portal-auth-wrapper">
@@ -229,8 +249,17 @@
                   <span id="user-display-name">User</span>
                 </h1>
                 <span id="user-display-status" class="capsule-badge capsule-emerald">ACTIVE</span>
+                <span id="user-role-badge" class="capsule-badge capsule-amber font-mono" style="display: none;">
+                  <span class="pulse-dot pulse-dot-emerald"></span>👑 ROOT ADMIN
+                </span>
                 <span id="user-device-tier-badge" class="capsule-badge capsule-emerald">
                   <span class="pulse-dot pulse-dot-emerald"></span>PRIMARY DEVICE
+                </span>
+                <span id="user-mfa-badge" class="capsule-badge capsule-emerald" title="Zero-Trust Adaptive Multi-Factor Authentication is active">
+                  <span class="pulse-dot pulse-dot-emerald"></span>🛡️ MFA: ACTIVE (ZERO-TRUST)
+                </span>
+                <span id="btn-desktop-notif-status" class="capsule-badge capsule-cyan" style="cursor: pointer;" onclick="toggleDesktopNotifications()" title="Desktop system notifications status">
+                  <span class="pulse-dot pulse-dot-cyan"></span>🔔 DESKTOP ALERTS: ACTIVE
                 </span>
               </div>
               <div class="portal-hud-meta">
@@ -257,6 +286,10 @@
                 <span class="material-symbols-outlined" style="font-size: 1rem;">explore</span>
                 <span>Tour</span>
               </button>
+              <button class="btn btn-secondary btn-sm" onclick="openModal('modal-update-secondary-password')" title="Manage Master Secondary Security Password">
+                <span class="material-symbols-outlined" style="font-size: 1rem;">password</span>
+                <span>Secondary PIN</span>
+              </button>
               <button class="btn btn-danger btn-sm glow-crimson" id="btn-portal-freeze" onclick="emergencyLockAccount()" title="Sign out all devices immediately">
                 <span class="material-symbols-outlined" style="font-size: 1rem;">lock_reset</span>
                 <span>Sign Out Everywhere</span>
@@ -268,6 +301,23 @@
             </div>
           </div>
         </section>
+
+        <!-- Primary Device Self-Unfreeze Alert Banner (Shown if account status is LOCKED but accessed from Primary Device) -->
+        <div id="primary-unfreeze-banner" class="glass-panel" style="display: none; background: rgba(239, 68, 68, 0.12); border: 1px solid var(--accent-crimson); margin-bottom: 1.2rem; padding: 0.9rem 1.2rem; border-radius: 8px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.8rem;">
+            <div style="display: flex; align-items: center; gap: 0.8rem;">
+              <span class="material-symbols-outlined" style="font-size: 1.8rem; color: var(--accent-crimson);">lock</span>
+              <div>
+                <div style="font-weight: 700; color: #fff; font-size: 0.95rem;">Account Currently Frozen (Incident Lockdown)</div>
+                <div style="font-size: 0.82rem; color: var(--text-muted);">You are securely authenticated on your Primary Security Portal. Remote attackers are locked out.</div>
+              </div>
+            </div>
+            <button class="btn btn-success btn-sm" onclick="executeSelfUnlock()" title="Restore account to ACTIVE">
+              <span class="material-symbols-outlined" style="font-size: 1rem;">lock_open</span>
+              <span>Unfreeze Account</span>
+            </button>
+          </div>
+        </div>
 
         <!-- Secondary Device Notice Banner (Shown only on secondary devices) -->
         <div id="secondary-device-notice" class="glass-panel secondary-device-banner" style="display: none;">
@@ -282,9 +332,14 @@
               </div>
             </div>
           </div>
-          <span class="capsule-badge capsule-amber">
-            <span class="pulse-dot pulse-dot-amber"></span>SECONDARY DEVICE
-          </span>
+          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+            <button class="btn btn-warning btn-sm" onclick="openModal('modal-set-primary-confirm')" title="Transfer primary authority to this device using Secondary Password">
+              👑 Make This Main Device
+            </button>
+            <span class="capsule-badge capsule-amber">
+              <span class="pulse-dot pulse-dot-amber"></span>SECONDARY DEVICE
+            </span>
+          </div>
         </div>
 
         <!-- Bento Matrix: 4 Hero Metric Telemetry Nodes -->
@@ -387,7 +442,7 @@
                     Devices you have approved to access your account.
                   </p>
                 </div>
-                <button class="btn btn-secondary btn-sm" onclick="openModal('modal-primary-device-prompt')" title="Change or confirm main device">
+                <button class="btn btn-secondary btn-sm" id="btn-manage-device" onclick="openModal('modal-primary-device-prompt')" title="Change or confirm main device">
                   <span class="material-symbols-outlined" style="font-size: 0.95rem;">tune</span>
                   <span>Manage Device</span>
                 </button>
@@ -678,6 +733,47 @@
         </div>
       </div>
 
+      <!-- Scenario 5: Custom Simulation Vector & Parameters -->
+      <div class="cyber-card" style="margin-bottom: 1.5rem; border-left: 4px solid var(--accent-amber);">
+        <div class="card-header" style="margin-bottom: 0.75rem;">
+          <div class="card-title" style="display: flex; align-items: center; gap: 0.5rem;">
+            <span>🎛️ Scenario 5: Custom Cyber Attack Vector</span>
+            <span class="badge badge-medium">Interactive Tuning</span>
+          </div>
+          <button class="btn btn-danger btn-sm scenario-btn" onclick="runScenario('CUSTOM')" style="width: auto; padding: 0.4rem 1.2rem;">
+            ⚡ Launch Custom Vector
+          </button>
+        </div>
+        <p class="scenario-desc" style="margin-bottom: 1rem;">
+          Calibrate custom flight velocities and IP addresses to evaluate the Scikit-Learn Isolation Forest and Deep Autoencoder boundaries.
+        </p>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem;">
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <label class="form-label" for="custom-speed-slider" style="margin-bottom: 0; font-size: 0.8rem;">
+                Simulated Velocity (km/h):
+              </label>
+              <span id="custom-speed-val" style="font-family: var(--font-mono); font-size: 0.85rem; color: var(--accent-amber); font-weight: 700;">1,200 km/h</span>
+            </div>
+            <input type="range" id="custom-speed-slider" min="100" max="15000" step="100" value="1200" class="form-range" style="width: 100%; cursor: pointer;" oninput="document.getElementById('custom-speed-val').textContent = Number(this.value).toLocaleString() + ' km/h'">
+            <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-dim); margin-top: 0.2rem;">
+              <span>100 km/h (Car)</span>
+              <span>800 km/h (Jet)</span>
+              <span>15,000 km/h (Hypersonic)</span>
+            </div>
+          </div>
+          <div>
+            <label class="form-label" for="custom-ip-input" style="margin-bottom: 0.35rem; font-size: 0.8rem;">
+              Simulated Attacker Origin IP:
+            </label>
+            <input type="text" id="custom-ip-input" class="form-input" value="185.220.101.5" placeholder="e.g. 185.220.101.5 (Tor) or 45.33.32.156 (VPN)">
+            <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 0.2rem;">
+              Tor ranges (185.220.*) or Datacenter ranges (45.33.*) trigger distinct ML feature weights.
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Live Terminal Output -->
       <div class="cyber-card">
         <div class="card-header">
@@ -946,6 +1042,77 @@
         </div>
       </div>
     </section>
+ 
+    <!-- ============================================================= -->
+    <!-- VIEW 6: CMS ADMIN & ACCESS CONTROL PANEL                      -->
+    <!-- ============================================================= -->
+    <section id="cms-dashboard" class="tab-view" aria-labelledby="cms-heading">
+      <div style="margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <h1 id="cms-heading" style="font-size: 1.5rem; font-weight: 700; color: #fff;">
+            CMS Admin & Access Governance
+          </h1>
+          <p style="color: var(--text-muted); font-size: 0.85rem;">
+            Identity directory, active token metrics, maintenance mode state, and platform administrative controls.
+          </p>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="cmsLoadData()" title="Refresh CMS Telemetry">
+          <span class="material-symbols-outlined" style="font-size: 0.95rem;">refresh</span>
+          <span>Refresh CMS</span>
+        </button>
+      </div>
+
+      <!-- CMS Metric Cards -->
+      <div class="grid-4" style="margin-bottom: 1.5rem;">
+        <div class="cyber-card" style="text-align: center;">
+          <div style="font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase;">Total Registered Users</div>
+          <div id="cms-metric-users" style="font-size: 1.75rem; font-weight: 800; font-family: var(--font-mono); color: #fff;">0</div>
+        </div>
+        <div class="cyber-card" style="text-align: center;">
+          <div style="font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase;">Active Auth Sessions</div>
+          <div id="cms-metric-sessions" style="font-size: 1.75rem; font-weight: 800; font-family: var(--font-mono); color: var(--accent-cyan);">0</div>
+        </div>
+        <div class="cyber-card" style="text-align: center;">
+          <div style="font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase;">Blocked Attack Hijacks</div>
+          <div id="cms-metric-blocked" style="font-size: 1.75rem; font-weight: 800; font-family: var(--font-mono); color: var(--accent-crimson);">0</div>
+        </div>
+        <div class="cyber-card" style="text-align: center;">
+          <div style="font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase;">Maintenance Mode</div>
+          <div style="margin-top: 0.35rem;">
+            <button id="cms-btn-maintenance" class="btn btn-secondary btn-sm" onclick="cmsToggleMaintenance()" style="width: 100%;">
+              Enable
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- CMS Registered Users Table -->
+      <div class="cyber-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span>👥 Registered User Directory</span>
+          </div>
+          <span class="badge badge-low">Database Synced</span>
+        </div>
+        <div class="cyber-table-wrapper">
+          <table class="cyber-table" aria-label="CMS user directory">
+            <thead>
+              <tr>
+                <th>Full Name</th>
+                <th>Work Email</th>
+                <th>Account Status</th>
+                <th>MFA Enabled</th>
+                <th>Last Login</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="cms-users-tbody">
+              <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Loading users...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
 
   </main>
 
@@ -953,29 +1120,180 @@
   <!-- REUSABLE ACCESSIBLE MODALS & UX STATES                        -->
   <!-- ============================================================= -->
 
-  <!-- Modal: Step-Up MFA Challenge -->
+  <!-- Modal: Step-Up MFA Challenge (Secondary Device) -->
   <div id="modal-mfa-challenge" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="mfa-modal-title">
     <div class="cyber-modal-box">
       <button class="modal-close-btn" onclick="closeModal('modal-mfa-challenge')" aria-label="Close dialog">✕</button>
-      <h2 id="mfa-modal-title" style="color: #fff; font-size: 1.25rem; margin-bottom: 0.5rem;">
-        🔐 Adaptive Step-Up MFA Challenge
-      </h2>
-      <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
-        Our Machine Learning model detected an unusual access pattern. Please enter the 6-digit verification code to confirm your identity.
+      <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
+        <span class="material-symbols-outlined" style="font-size: 1.6rem; color: var(--accent-amber);">devices</span>
+        <h2 id="mfa-modal-title" style="color: #fff; font-size: 1.25rem; margin: 0;">
+          Cross-Device Verification Required
+        </h2>
+      </div>
+      <p id="mfa-modal-desc" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.2rem; line-height: 1.5;">
+        A 6-digit verification code has been dispatched to your <strong class="text-cyan font-mono">Primary Device</strong> screen. Check your primary device to view the code or allow access.
       </p>
 
       <form id="form-verify-mfa" onsubmit="handleVerifyMFA(event)">
         <input type="hidden" id="mfa-email-hidden">
         <input type="hidden" id="mfa-temp-token-hidden">
 
-        <div class="form-group">
-          <label class="form-label" for="mfa-code-input">6-Digit Verification Code</label>
-          <input type="text" id="mfa-code-input" class="form-input" style="font-size: 1.25rem; letter-spacing: 0.3em; text-align: center; font-family: var(--font-mono);" maxlength="6" required placeholder="000000">
+        <div class="form-group" style="text-align: center;">
+          <label class="form-label" for="mfa-code-input" style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary);">Enter 6-Digit Code</label>
+          <input type="text" id="mfa-code-input" class="form-input" style="font-size: 1.6rem; letter-spacing: 0.35em; text-align: center; font-family: var(--font-mono); font-weight: 700; color: var(--accent-cyan); background: rgba(0,0,0,0.3); padding: 0.6rem;" maxlength="6" required placeholder="000000" autocomplete="one-time-code">
         </div>
 
-        <button type="submit" class="btn btn-primary" style="width: 100%;">
-          Verify Identity & Authorize Session
+        <div id="mfa-poll-status-indicator" style="font-size: 0.78rem; color: var(--accent-amber); text-align: center; margin-bottom: 1rem;">
+          <span class="pulse-dot pulse-dot-amber"></span> Awaiting code entry or One-Click Approval on Primary Device...
+        </div>
+
+        <div style="display: flex; gap: 0.5rem;">
+          <button type="submit" class="btn btn-primary" style="flex: 1;">
+            Verify Code & Sign In
+          </button>
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-mfa-challenge')">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Primary Device Incoming Secondary Login Approval -->
+  <div id="modal-secondary-device-approval" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="sec-approval-title">
+    <div class="cyber-modal-box" style="border-color: rgba(16, 185, 129, 0.5); box-shadow: 0 0 35px rgba(16, 185, 129, 0.25);">
+      <button class="modal-close-btn" onclick="closeModal('modal-secondary-device-approval'); stopTitlePulse();" aria-label="Close dialog">✕</button>
+      <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem;">
+        <div style="width: 36px; height: 36px; border-radius: 50%; background: rgba(16, 185, 129, 0.15); display: flex; align-items: center; justify-content: center; color: var(--accent-emerald);">
+          <span class="material-symbols-outlined">security_update_good</span>
+        </div>
+        <div>
+          <h2 id="sec-approval-title" style="color: #fff; font-size: 1.15rem; margin: 0;">
+            Secondary Device Sign-In Request
+          </h2>
+          <div style="font-size: 0.75rem; color: var(--accent-emerald); font-family: var(--font-mono);">
+            PRIMARY SECURITY PORTAL HUD
+          </div>
+        </div>
+      </div>
+
+      <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 0.8rem;">
+        A secondary device is requesting access to your account. You can share this verification code or approve access instantly below:
+      </p>
+
+      <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.8rem;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem;">
+          <span class="text-muted">Device:</span>
+          <strong id="sec-approval-device" class="text-cyan font-mono">Browser on Desktop</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 0.35rem;">
+          <span class="text-muted">Location:</span>
+          <span id="sec-approval-location" class="text-secondary font-mono">Local Network</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span class="text-muted">IP Address:</span>
+          <code id="sec-approval-ip" class="font-mono text-muted">127.0.0.1</code>
+        </div>
+      </div>
+
+      <div style="text-align: center; margin-bottom: 1.2rem;">
+        <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 0.4rem;">
+          Verification Code (For Secondary Device)
+        </div>
+        <div id="sec-approval-code" style="font-size: 2.2rem; font-family: var(--font-mono); font-weight: 800; letter-spacing: 0.25em; color: var(--accent-emerald); text-shadow: 0 0 15px rgba(16, 185, 129, 0.6); padding: 0.6rem 1rem; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; display: inline-block;">
+          ------
+        </div>
+      </div>
+
+      <input type="hidden" id="sec-approval-token-hidden">
+
+      <div style="display: flex; gap: 0.6rem;">
+        <button type="button" class="btn btn-primary" style="flex: 1; background: linear-gradient(135deg, #10b981, #059669); font-weight: 700; border: none; box-shadow: 0 0 20px rgba(16, 185, 129, 0.45); padding: 0.65rem 1rem;" onclick="executeApproveSecondary(true)">
+          <span class="material-symbols-outlined" style="font-size: 1.1rem;">check_circle</span>
+          <span>Allow Sign-In (1-Click)</span>
         </button>
+        <button type="button" class="btn btn-danger" style="flex: 1;" onclick="executeApproveSecondary(false)">
+          <span class="material-symbols-outlined" style="font-size: 1rem;">cancel</span>
+          <span>Deny & Block</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Master Secondary Password Transfer Primary Device Confirm -->
+  <div id="modal-set-primary-confirm" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="transfer-primary-title">
+    <div class="cyber-modal-box">
+      <button class="modal-close-btn" onclick="closeModal('modal-set-primary-confirm')" aria-label="Close dialog">✕</button>
+      <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
+        <span class="material-symbols-outlined" style="font-size: 1.6rem; color: var(--accent-amber);">key</span>
+        <h2 id="transfer-primary-title" style="color: #fff; font-size: 1.2rem; margin: 0;">
+          Transfer Primary Device Authority
+        </h2>
+      </div>
+      <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 1rem;">
+        To protect against unauthorized takeovers, you must verify your <strong class="text-cyan">Master Secondary Security Password</strong> to designate this machine as your Primary Security Portal.
+      </p>
+
+      <form id="form-transfer-primary" onsubmit="executeSetPrimaryWithPassword(event)">
+        <div class="form-group">
+          <label class="form-label" for="input-transfer-sec-password">Master Secondary Security Password</label>
+          <div class="password-input-wrap">
+            <input type="password" id="input-transfer-sec-password" class="form-input" required placeholder="Enter Secondary Security Password">
+            <button type="button" class="pw-toggle-btn" onclick="togglePasswordVisibility('input-transfer-sec-password', this)">👁️</button>
+          </div>
+          <div style="font-size: 0.74rem; color: var(--text-muted); margin-top: 0.4rem;">
+            Default for demo accounts: <code class="font-mono text-cyan">MasterKey#2026</code>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 0.5rem; margin-top: 1.2rem;">
+          <button type="submit" class="btn btn-warning" style="flex: 1;">
+            👑 Confirm Device Promotion
+          </button>
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-set-primary-confirm')">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Update Master Secondary Security Password -->
+  <div id="modal-update-secondary-password" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="update-sec-pwd-title">
+    <div class="cyber-modal-box">
+      <button class="modal-close-btn" onclick="closeModal('modal-update-secondary-password')" aria-label="Close dialog">✕</button>
+      <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
+        <span class="material-symbols-outlined" style="font-size: 1.6rem; color: var(--accent-cyan);">password</span>
+        <h2 id="update-sec-pwd-title" style="color: #fff; font-size: 1.2rem; margin: 0;">
+          Master Secondary Security Password
+        </h2>
+      </div>
+      <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 1rem;">
+        Your secondary password is used as an identity key to authorize Primary Device transfers and high-risk operations.
+      </p>
+
+      <form onsubmit="handleUpdateSecondaryPassword(event)">
+        <div class="form-group">
+          <label class="form-label" for="sec-pwd-current">Current Password (Account or Current Secondary)</label>
+          <input type="password" id="sec-pwd-current" class="form-input" required placeholder="Enter current password">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="sec-pwd-new">New Master Secondary Password</label>
+          <input type="password" id="sec-pwd-new" class="form-input" required minlength="6" placeholder="Min 6 characters">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="sec-pwd-confirm">Confirm New Secondary Password</label>
+          <input type="password" id="sec-pwd-confirm" class="form-input" required minlength="6" placeholder="Repeat new secondary password">
+        </div>
+
+        <div style="display: flex; gap: 0.5rem; margin-top: 1.2rem;">
+          <button type="submit" class="btn btn-primary" style="flex: 1;">
+            Save Secondary Password
+          </button>
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-update-secondary-password')">
+            Cancel
+          </button>
+        </div>
       </form>
     </div>
   </div>
@@ -1049,9 +1367,14 @@
       <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">
         Machine Learning model retraining and AWS serverless security infrastructure updates are currently in progress.
       </p>
-      <button class="btn btn-secondary" onclick="closeModal('modal-maintenance'); window.location.reload();">
-        Retry Connection
-      </button>
+      <div style="display: flex; gap: 0.8rem; justify-content: center; flex-wrap: wrap;">
+        <button class="btn btn-secondary" onclick="closeModal('modal-maintenance'); window.location.reload();">
+          Retry Connection
+        </button>
+        <button id="btn-modal-maint-admin-unlock" class="btn btn-warning" onclick="cmsToggleMaintenance(); closeModal('modal-maintenance');" style="display: none;">
+          👑 Root Admin Override: Disable Maintenance
+        </button>
+      </div>
     </div>
   </div>
 
@@ -1374,34 +1697,49 @@
   </footer>
 
   <!-- Scripts -->
-  <script src="/static/js/bg_animation.js"></script>
-  <script src="/static/js/fingerprint.js"></script>
-  <script src="/static/js/legal_views.js"></script>
-  <script src="/static/js/user_portal.js"></script>
-  <script src="/static/js/attack_simulator.js"></script>
-  <script src="/static/js/soc_dashboard.js"></script>
-  <script src="/static/js/cloudwatch_view.js"></script>
-  <script src="/static/js/app.js"></script>
+  <script src="/static/js/bg_animation.js?v=2.7.0"></script>
+  <script src="/static/js/fingerprint.js?v=2.7.0"></script>
+  <script src="/static/js/legal_views.js?v=2.7.0"></script>
+  <script src="/static/js/user_portal.js?v=2.7.0"></script>
+  <script src="/static/js/attack_simulator.js?v=2.7.0"></script>
+  <script src="/static/js/soc_dashboard.js?v=2.7.0"></script>
+  <script src="/static/js/cloudwatch_view.js?v=2.7.0"></script>
+  <script src="/static/js/cms_dashboard.js?v=2.7.0"></script>
+  <script src="/static/js/app.js?v=2.7.0"></script>
 
   <script>
-    function toggleAuthTab(mode) {
+    function switchAuthTab(mode) {
       const loginForm = document.getElementById("form-login");
       const regForm = document.getElementById("form-register");
       const btnLogin = document.getElementById("auth-tab-login");
       const btnReg = document.getElementById("auth-tab-register");
 
       if (mode === "login") {
-        loginForm.style.display = "block";
-        regForm.style.display = "none";
-        btnLogin.classList.add("active");
-        btnReg.classList.remove("active");
+        if (loginForm) loginForm.style.display = "block";
+        if (regForm) regForm.style.display = "none";
+        if (btnLogin) {
+          btnLogin.classList.add("active");
+          btnLogin.setAttribute("aria-selected", "true");
+        }
+        if (btnReg) {
+          btnReg.classList.remove("active");
+          btnReg.setAttribute("aria-selected", "false");
+        }
       } else {
-        loginForm.style.display = "none";
-        regForm.style.display = "block";
-        btnLogin.classList.remove("active");
-        btnReg.classList.add("active");
+        if (loginForm) loginForm.style.display = "none";
+        if (regForm) regForm.style.display = "block";
+        if (btnLogin) {
+          btnLogin.classList.remove("active");
+          btnLogin.setAttribute("aria-selected", "false");
+        }
+        if (btnReg) {
+          btnReg.classList.add("active");
+          btnReg.setAttribute("aria-selected", "true");
+        }
       }
     }
+    window.switchAuthTab = switchAuthTab;
+    window.toggleAuthTab = switchAuthTab;
   </script>
 </body>
 </html>

@@ -189,6 +189,8 @@ function drawFlightVisualizer(event) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
+  const ev = event || { geo: { city: "Tokyo", country: "Japan" }, risk_score: 88 };
+
   const w = canvas.width;
   const h = canvas.height;
 
@@ -208,8 +210,8 @@ function drawFlightVisualizer(event) {
   // Baseline Point (New York)
   const p1 = { x: w * 0.25, y: h * 0.65, label: "New York (Baseline)" };
   // Target Point
-  const isAnom = (event.risk_score || 0) >= 70;
-  const p2 = { x: w * 0.75, y: h * 0.35, label: `${event.geo?.city || 'Tokyo'} (${isAnom ? 'Impossible Flight' : 'Normal'})` };
+  const isAnom = (ev.risk_score || 0) >= 70;
+  const p2 = { x: w * 0.75, y: h * 0.35, label: `${ev.geo?.city || 'Tokyo'} (${isAnom ? 'Impossible Flight' : 'Normal'})` };
 
   // Draw Arc
   ctx.beginPath();

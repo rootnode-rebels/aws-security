@@ -192,21 +192,32 @@ def run_two_browser_verification():
     assert freeze_resp.status_code == 200
     print(f"  -> Account freeze response: {freeze_resp.json()}")
 
-    # STEP 9: Verify subsequent access from both browsers is 403 Forbidden
-    print("\n[Step 9] Verifying both browsers are immediately blocked...")
+    # STEP 9: Verify Primary Device remains authenticated (Immune to Logout) in frozen state, while secondary attempts are rejected
+    print("\n[Step 9] Verifying Primary Device immunity from logout...")
     check1 = client.get("/api/auth/me", headers=headers1)
-    assert check1.status_code in (401, 403), f"Expected 401 or 403, got {check1.status_code}"
-    print("  -> Browser 1 request revoked (Session deleted / Account frozen)")
+    assert check1.status_code == 200, f"Primary device must remain authenticated! Got {check1.status_code}"
+    assert check1.json()["account_is_frozen"] is True
+    assert check1.json()["status"] == "LOCKED"
+    print("  -> Browser 1 (Primary Device) remains logged in with account_is_frozen=True!")
 
+    # Secondary attempts are rejected
     check2 = client.post("/api/auth/login", json={
         "email": email,
         "password": password
     })
     assert check2.status_code in (401, 403)
-    print("  -> Browser 2 login attempt is rejected")
+    print("  -> Browser 2 (Secondary Device) login attempt is rejected with 403 Account Locked")
 
-    # Reset account state back to ACTIVE for developer use
-    db.users.update_one({"email": email}, {"$set": {"status": "ACTIVE"}})
+    # Primary Device self-unfreezes account
+    unfreeze = client.post("/api/auth/unlock-self", headers=headers1)
+    assert unfreeze.status_code == 200
+    print("  -> Browser 1 self-unfreezes account back to ACTIVE!")
+
+    # Verify restored state
+    check1_restored = client.get("/api/auth/me", headers=headers1)
+    assert check1_restored.status_code == 200
+    assert check1_restored.json()["status"] == "ACTIVE"
+    assert check1_restored.json()["account_is_frozen"] is False
     print("\n[SUCCESS] ALL 2-BROWSER REAL-TIME SCENARIOS VERIFIED 100% WORKING!")
     print("=======================================================\n")
 
