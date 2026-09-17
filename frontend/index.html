@@ -347,7 +347,7 @@
                 <span class="material-symbols-outlined" style="font-size: 1rem;">lock_reset</span>
                 <span>Sign Out Everywhere</span>
               </button>
-              <button class="btn btn-secondary btn-sm" onclick="handleLogout()" title="Sign Out">
+              <button id="btn-prominent-logout" class="btn btn-primary btn-sm prominent-logout" onclick="handleLogout()" title="Securely Sign Out">
                 <span class="material-symbols-outlined" style="font-size: 1rem;">logout</span>
                 <span>Sign Out</span>
               </button>
@@ -1216,9 +1216,10 @@
         <div class="cyber-card" style="text-align: center;">
           <div style="font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase;">Maintenance Mode</div>
           <div style="margin-top: 0.35rem;">
-            <button id="cms-btn-maintenance" class="btn btn-secondary btn-sm" onclick="cmsToggleMaintenance()" style="width: 100%;">
+            <button id="cms-btn-maintenance" class="btn btn-secondary btn-sm" onclick="cmsToggleMaintenance()" style="width: 100%; margin-bottom: 5px;">
               Enable
             </button>
+            <div style="font-size: 0.65rem; color: var(--text-muted); text-align: center;">Toggle to pause/resume non-admin portal operations.</div>
           </div>
         </div>
       </div>

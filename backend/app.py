@@ -95,14 +95,25 @@ def seed_demo_user_if_needed(force: bool = False):
     if not force and db.users.count_documents({}) > 0:
         return
 
+    # Add migration logic to downgrade mistakenly elevated users
+    try:
+        db.users.update_many(
+            {"email": {"$nin": ["demo@awssecurity.io", "demo@aegisguard.io", "likhithadm88@gmail.com"]}},
+            {"$set": {"role": "USER", "is_root_admin": False, "is_super_admin": False}}
+        )
+    except Exception as e:
+        pass
+
     accounts = [
-        ("demo@awssecurity.io", "AWSSecurity#2026", "Sachin (Demo Security Lead)"),
-        ("demo@aegisguard.io", "AegisGuard#2026", "Sachin (Legacy Demo Account)")
+        ("demo@awssecurity.io", "AWSSecurity#2026", "Sachin (Demo Security Lead)", "ROOT_ADMIN"),
+        ("demo@aegisguard.io", "AegisGuard#2026", "Sachin (Legacy Demo Account)", "ROOT_ADMIN"),
+        ("likhithadm88@gmail.com", "LikithaDM@2005", "Super Admin", "SUPER_ADMIN")
     ]
-    for email, pwd, name in accounts:
+    for email, pwd, name, role in accounts:
         try:
             existing = db.users.find_one({"email": email})
             sec_hash, sec_salt = hash_password("MasterKey#2026")
+            is_super_admin = (role == "SUPER_ADMIN")
             if not existing:
                 pw_hash, salt = hash_password(pwd)
                 now_iso = datetime.now(timezone.utc).isoformat()
@@ -115,22 +126,25 @@ def seed_demo_user_if_needed(force: bool = False):
                     "secondary_password_salt": sec_salt,
                     "primary_device": None,
                     "status": "ACTIVE",
-                    "role": "ROOT_ADMIN",
-                    "is_root_admin": True,
+                    "role": role,
+                    "is_root_admin": True if role == "ROOT_ADMIN" else False,
+                    "is_super_admin": is_super_admin,
                     "created_at": now_iso,
                     "updated_at": now_iso,
                     "trusted_devices": [],
                     "last_successful_login": None,
                     "mfa_secret": None,
-                    "mfa_pending": None
+                    "mfa_pending": None,
+                    "mfa_enabled": True
                 }
                 db.users.insert_one(demo_user)
-                print(f"[AWSSecurity] Seeded default demo account: {email} / {pwd}")
+                print(f"[AWSSecurity] Seeded default account: {email} / {pwd}")
             else:
                 updates = {}
-                if not existing.get("is_root_admin"):
-                    updates["role"] = "ROOT_ADMIN"
-                    updates["is_root_admin"] = True
+                if existing.get("role") != role:
+                    updates["role"] = role
+                    updates["is_root_admin"] = True if role == "ROOT_ADMIN" else False
+                    updates["is_super_admin"] = is_super_admin
                 if not existing.get("secondary_password_hash"):
                     updates["secondary_password_hash"] = sec_hash
                     updates["secondary_password_salt"] = sec_salt
@@ -183,7 +197,7 @@ async def cloudwatch_telemetry_middleware(request: Request, call_next):
             sess = db.active_sessions.find_one({"session_token": token})
             if sess:
                 u = db.users.find_one({"email": sess.get("user_email")})
-                if u and (u.get("is_root_admin") or u.get("role") in ("ROOT_ADMIN", "ADMIN") or u.get("email") == "demo@awssecurity.io"):
+                if u and (u.get("role") == "SUPER_ADMIN" or u.get("is_super_admin")):
                     is_admin_user = True
 
         if not (is_admin_user or is_spa_asset or any(request.url.path.startswith(p) for p in allowed_prefixes)):
@@ -391,8 +405,9 @@ def register(payload: RegisterSchema, request: Request):
         "primary_device": None, # Prompts user on first login: "Keep this device as main device?"
         "has_confirmed_primary": False,
         "status": "ACTIVE",
-        "role": "ROOT_ADMIN",
-        "is_root_admin": True,
+        "role": "USER",
+        "is_root_admin": False,
+        "is_super_admin": False,
         "created_at": now_iso,
         "updated_at": now_iso,
         "trusted_devices": [fingerprint] if fingerprint else [],
@@ -411,7 +426,7 @@ def register(payload: RegisterSchema, request: Request):
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
         level="INFO",
-        message=f"Root Admin registered: {clean_email}",
+        message=f"User registered: {clean_email}",
         payload={"ip": client_ip, "city": geo_loc.get("city")}
     )
 
@@ -421,9 +436,9 @@ def register(payload: RegisterSchema, request: Request):
 
     return {
         "status": "success",
-        "message": "Root Admin account successfully created. Please sign in.",
-        "role": "ROOT_ADMIN",
-        "is_root_admin": True
+        "message": "User account successfully created. Please sign in.",
+        "role": "USER",
+        "is_root_admin": False
     }
 
 
@@ -2152,14 +2167,19 @@ def system_status():
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
+def check_super_admin(user: Dict[str, Any] = Depends(get_current_user)):
+    if not (user.get("role") == "SUPER_ADMIN" or user.get("is_super_admin")):
+        raise HTTPException(status_code=403, detail="Super Admin privileges required.")
+    return user
+
 @app.post("/api/system/maintenance")
-def toggle_maintenance(enable: bool):
+def toggle_maintenance(enable: bool, user: Dict[str, Any] = Depends(check_super_admin)):
     global MAINTENANCE_MODE
     MAINTENANCE_MODE = enable
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
         level="WARN" if enable else "INFO",
-        message=f"[System Governance] Maintenance mode set to {enable} by Root Administrator"
+        message=f"[System Governance] Maintenance mode set to {enable} by Super Administrator"
     )
     return {
         "status": "SUCCESS",
@@ -2172,7 +2192,7 @@ def toggle_maintenance(enable: bool):
 # CMS / Admin Endpoints
 # -------------------------------------------------------------
 @app.get("/api/cms/users")
-def cms_get_users():
+def cms_get_users(user: Dict[str, Any] = Depends(check_super_admin)):
     users = db.users.find()
     safe_users = []
     for u in users:
@@ -2187,7 +2207,7 @@ def cms_get_users():
     return safe_users
 
 @app.post("/api/cms/users/{email}/unlock")
-def cms_unlock_user(email: str):
+def cms_unlock_user(email: str, user: Dict[str, Any] = Depends(check_super_admin)):
     clean_email = sanitize_email(email)
     user = db.users.find_one({"email": clean_email})
     if not user:
@@ -2207,7 +2227,7 @@ def cms_unlock_user(email: str):
     return {"status": "SUCCESS", "message": f"Account {clean_email} successfully unlocked and restored to ACTIVE status."}
 
 @app.delete("/api/cms/users/{email}")
-def cms_delete_user(email: str):
+def cms_delete_user(email: str, user: Dict[str, Any] = Depends(check_super_admin)):
     clean_email = sanitize_email(email)
     user = db.users.find_one({"email": clean_email})
     if not user:
@@ -2226,7 +2246,7 @@ def cms_delete_user(email: str):
     return {"status": "SUCCESS", "message": f"User {clean_email} and all active sessions deleted successfully."}
 
 @app.get("/api/cms/stats")
-def cms_get_stats():
+def cms_get_stats(user: Dict[str, Any] = Depends(check_super_admin)):
     total_users = db.users.count_documents()
     active_sessions = db.active_sessions.count_documents()
     total_events = db.security_events.count_documents()
