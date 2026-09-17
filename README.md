@@ -300,3 +300,49 @@ aws-security-main/
 
 ## 📄 License
 This project is licensed under the **MIT License**.
+
+## 🚀 Execution & Environment Modes (`run_standalone.py`)
+
+The platform includes a robust **Universal Runner** (`run_standalone.py`) designed to bridge the gap between local development, Dockerized staging, and AWS production environments seamlessly without requiring code changes. 
+
+The application behavior dynamically scales based on the `DEPLOYMENT_MODE` environment variable:
+
+| Mode | Database | Telemetry | MFA & Alerts | Auto-Reload | Port Bind |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`STANDALONE_LOCAL`** *(Default)* | Local `db.json` | Local File Logger | Simulated UI Toasts | ✅ Yes | `127.0.0.1:8000` |
+| **`CONTAINER`** *(Docker)* | Local / Volumes | Local File Logger | Simulated UI Toasts | ❌ No | `0.0.0.0:8000` |
+| **`AWS_ECS_PROD`** *(Production)* | Amazon DocumentDB | Amazon CloudWatch | Real AWS SNS / SES | ❌ No | `0.0.0.0:80` |
+
+### Starting the Platform
+```bash
+# Standard Local Development
+python run_standalone.py
+
+# Docker Production Simulation
+DEPLOYMENT_MODE=CONTAINER PORT=8000 python run_standalone.py
+```
+
+### 🐳 Docker & AWS ECS Integration
+The included `Dockerfile` is optimized for **AWS Fargate** and **Elastic Container Service (ECS)**. 
+- It uses a **multi-stage build** to keep the image incredibly lean, stripping unnecessary build tools before production deployment.
+- A built-in `HEALTHCHECK` periodically pings the `/api/system/status` endpoint so AWS Load Balancers automatically cycle out unhealthy nodes.
+
+```bash
+# Build the production image locally
+docker build -t aws-security:latest .
+
+# Run the container locally mimicking AWS conditions
+docker run -p 80:80 -e DEPLOYMENT_MODE="AWS_ECS_PROD" aws-security:latest
+```
+
+## 👥 Seeded Demonstration Accounts
+
+For ease of testing during live presentations, the database automatically seeds specific Demo Personas upon first boot:
+
+| Persona | Email | Password | Role |
+| :--- | :--- | :--- | :--- |
+| **Primary Demo User** | `demouser@mail.com` | `DemoUser.AWS@29` | Legitimate User |
+| **Security Lead** | `demo@awssecurity.io` | `AWSSecurity#2026` | Root Admin |
+| **Legacy Account** | `demo@aegisguard.io` | `AegisGuard#2026` | Root Admin |
+
+*(Note: In `STANDALONE_LOCAL` mode, to prevent login frustration, MFA verification codes are dynamically exposed directly in the UI. In `AWS_ECS_PROD`, these are securely dispatched via Amazon SNS).*
