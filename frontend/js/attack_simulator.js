@@ -5,14 +5,22 @@
 
 function initAttackSimulator() {
   const targetEmailInput = document.getElementById("sim-target-email");
-  if (targetEmailInput && AppState.user) {
-    targetEmailInput.value = AppState.user.email;
+  const targetEmailText = document.getElementById("sim-target-email-text");
+  const userEmail = (AppState.user && AppState.user.email) ? AppState.user.email : "demo@awssecurity.io";
+
+  if (targetEmailInput) {
+    targetEmailInput.value = userEmail;
+    targetEmailInput.readOnly = true;
+    targetEmailInput.setAttribute("readonly", "readonly");
+  }
+  if (targetEmailText) {
+    targetEmailText.textContent = userEmail;
   }
 }
 
 async function runScenario(attackType) {
   const targetEmailInput = document.getElementById("sim-target-email");
-  const targetEmail = targetEmailInput ? targetEmailInput.value.trim() : (AppState.user?.email || "target_user@example.com");
+  const targetEmail = targetEmailInput?.value?.trim() || (AppState.user?.email || "demo@awssecurity.io");
 
   if (!targetEmail) {
     showToast("Please enter a target account email for the simulation.", "warning");
@@ -94,3 +102,24 @@ function clearTerminal() {
   const terminal = document.getElementById("sim-terminal-output");
   if (terminal) terminal.innerHTML = `<div class="telemetry-line info">[CONSOLE READY] Awaiting cyber attack simulation command...</div>`;
 }
+
+function selectAttackIp(ip, typeLabel, badgeClass, btn) {
+  const hiddenInput = document.getElementById("custom-ip-input");
+  const displaySpan = document.getElementById("custom-ip-display");
+  const badgeSpan = document.getElementById("custom-ip-type-badge");
+  
+  if (hiddenInput) hiddenInput.value = ip;
+  if (displaySpan) displaySpan.textContent = ip;
+  if (badgeSpan) {
+    badgeSpan.textContent = typeLabel;
+    badgeSpan.className = `badge ${badgeClass}`;
+  }
+
+  document.querySelectorAll(".ip-preset-btn").forEach(b => b.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  logTerminal(`[ANOMALY VECTOR] Calibrated attacker origin IP to ${ip} (${typeLabel})`, "info");
+}
+window.selectAttackIp = selectAttackIp;
+window.clearTerminal = clearTerminal;
+window.runScenario = runScenario;
+window.initAttackSimulator = initAttackSimulator;

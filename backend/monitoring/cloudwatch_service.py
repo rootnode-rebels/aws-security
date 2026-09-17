@@ -137,4 +137,25 @@ class CloudWatchService:
                 "timeseries": self.metric_timeseries[-50:]
             }
 
+    def clear_logs(self):
+        """Clears all audit logs and resets metric telemetry counters."""
+        with self.lock:
+            db.cloudwatch_logs.delete_many({})
+            self.metric_timeseries.clear()
+            self.metrics = {
+                "Invocations": 0,
+                "HighRiskDetections": 0,
+                "BlockedHijacks": 0,
+                "StepUpMFAChallenges": 0,
+                "NormalLogins": 0,
+                "TotalExecutionLatencyMs": 0.0,
+                "RiskScoreSum": 0.0,
+                "RiskEvaluations": 0
+            }
+            for a in self.alarms.values():
+                a["state"] = "OK"
+                a["reason"] = "Threshold not breached (logs cleared)."
+                a["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+
 cloudwatch = CloudWatchService()

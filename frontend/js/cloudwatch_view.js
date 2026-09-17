@@ -125,3 +125,21 @@ function filterCloudWatchLogs() {
     `;
   }).join("");
 }
+
+// Clear All CloudWatch Logs & Reset Telemetry Counters
+async function clearCloudWatchLogs() {
+  if (!confirm("Are you sure you want to clear all CloudWatch logs and reset telemetry metrics?")) return;
+  try {
+    const res = await apiFetch("/api/monitoring/cloudwatch/clear", { method: "POST" });
+    if (res.ok) {
+      showToast("CloudWatch audit logs & metrics reset.", "info");
+      allCloudWatchLogs = [];
+      await loadCloudWatchTelemetry();
+    } else {
+      showToast("Failed to reset CloudWatch telemetry.", "error");
+    }
+  } catch (err) {
+    showToast("Error resetting CloudWatch telemetry.", "error");
+  }
+}
+window.clearCloudWatchLogs = clearCloudWatchLogs;

@@ -6,17 +6,27 @@
   <title>AWSSecurity | Real-Time Account Hijacking Detection & Prevention</title>
   <meta name="description" content="Cloud-native AWS serverless and Machine Learning cybersecurity platform detecting and preventing account hijacking in real time.">
   
-  <!-- Google Fonts: Inter, Outfit, JetBrains Mono & Material Symbols Outlined -->
+  <!-- Google Fonts: Inter, Plus Jakarta Sans, JetBrains Mono, Outfit & Material Symbols Outlined -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
   
-  <link rel="stylesheet" href="/static/css/style.css?v=2.2.0">
+  <link rel="stylesheet" href="/static/css/style.css?v=4.2.0-auth-hidden">
 </head>
 <body>
-  <!-- Dynamic Background Canvas -->
-  <canvas id="cyber-bg" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none;"></canvas>
+  <!-- Dynamic Liquid Glass Background Canvas (Unblocked Layer 0) -->
+  <canvas id="cyber-bg" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none;"></canvas>
+
+  <!-- Liquid Glass Optical Refraction SVG Filter Definition -->
+  <svg style="position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none;" aria-hidden="true">
+    <defs>
+      <filter id="liquid-refraction" x="-10%" y="-10%" width="120%" height="120%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.015" numOctaves="2" result="noise" />
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="8" xChannelSelector="R" yChannelSelector="G" result="displaced" />
+      </filter>
+    </defs>
+  </svg>
 
   <a href="#main-content" class="skip-link">Skip to main content</a>
 
@@ -27,44 +37,43 @@
 
   <!-- Navigation Bar -->
   <header class="navbar" role="banner">
-    <a href="#" class="brand-container" onclick="switchTab('user-portal'); return false;">
+    <a href="#" class="brand-container" onclick="switchTab('user-portal'); return false;" title="AWSSecurity AI Home">
       <div class="brand-icon">🛡️</div>
       <div class="brand-text">
         <div class="brand-title">AWSSecurity <span class="brand-badge">AI</span></div>
-        <div class="brand-subtitle">Cloud Native • ML Defense</div>
       </div>
     </a>
 
     <nav aria-label="Main Navigation">
       <ul class="nav-links">
         <li>
-          <button class="nav-btn active" data-tab="user-portal" id="nav-user-portal" aria-controls="user-portal">
-            <span class="nav-icon">👤</span><span class="nav-label">User Portal</span>
+          <button class="nav-btn active" data-tab="user-portal" id="nav-user-portal" aria-controls="user-portal" title="User Security Portal">
+            <span class="nav-icon">👤</span><span class="nav-label">Portal</span>
           </button>
         </li>
         <li>
-          <button class="nav-btn" data-tab="attack-studio" id="nav-attack-studio" aria-controls="attack-studio">
-            <span class="nav-icon">⚡</span><span class="nav-label">Attack Simulator</span>
+          <button class="nav-btn" data-tab="attack-studio" id="nav-attack-studio" aria-controls="attack-studio" title="Red Team Attack Simulator">
+            <span class="nav-icon">⚡</span><span class="nav-label">Simulator</span>
           </button>
         </li>
         <li>
-          <button class="nav-btn" data-tab="soc-dashboard" id="nav-soc-dashboard" aria-controls="soc-dashboard">
-            <span class="nav-icon">🛰️</span><span class="nav-label">SOC Blue Team</span>
+          <button class="nav-btn" data-tab="soc-dashboard" id="nav-soc-dashboard" aria-controls="soc-dashboard" title="SOC Blue Team Defense">
+            <span class="nav-icon">🛰️</span><span class="nav-label">Blue Team</span>
           </button>
         </li>
         <li>
-          <button class="nav-btn" data-tab="cloudwatch-view" id="nav-cloudwatch" aria-controls="cloudwatch-view">
-            <span class="nav-icon">📊</span><span class="nav-label">Telemetry & SIEM</span>
+          <button class="nav-btn" data-tab="cloudwatch-view" id="nav-cloudwatch" aria-controls="cloudwatch-view" title="CloudWatch Telemetry & SIEM">
+            <span class="nav-icon">📊</span><span class="nav-label">Telemetry</span>
           </button>
         </li>
         <li>
-          <button class="nav-btn" data-tab="compliance-view" id="nav-compliance" aria-controls="compliance-view">
+          <button class="nav-btn" data-tab="compliance-view" id="nav-compliance" aria-controls="compliance-view" title="Regulatory Compliance">
             <span class="nav-icon">📜</span><span class="nav-label">Compliance</span>
           </button>
         </li>
         <li>
-          <button class="nav-btn" data-tab="cms-dashboard" id="nav-cms-dashboard" aria-controls="cms-dashboard">
-            <span class="nav-icon">⚙️</span><span class="nav-label">CMS Admin</span>
+          <button class="nav-btn" data-tab="cms-dashboard" id="nav-cms-dashboard" aria-controls="cms-dashboard" title="CMS Admin Console">
+            <span class="nav-icon">⚙️</span><span class="nav-label">Admin</span>
           </button>
         </li>
       </ul>
@@ -73,13 +82,16 @@
     <div class="nav-status">
       <div class="status-beacon live-sync-beacon" title="Cross-Browser Real-Time Auto-Refresh Active (2s polling)">
         <span class="beacon-dot live-dot"></span>
-        <span id="sync-status-indicator">LIVE SYNC: 2s</span>
+        <span id="sync-status-indicator">LIVE: 2s</span>
       </div>
       <button id="btn-sound-toggle" class="btn btn-secondary btn-sm nav-sound-btn" onclick="toggleSoundAlerts()" title="Toggle Real-Time Audio Alarm Chimes">
         <span id="sound-toggle-label">🔊 Sound: ON</span>
       </button>
+      <button id="btn-nav-sns" class="btn btn-secondary btn-sm nav-sns-btn" onclick="openDispatchedMailbox()" title="View Security Notifications Dispatched via Amazon SNS & Email">
+        <span>📧 SNS Inbox</span>
+      </button>
       <button class="btn btn-primary btn-sm nav-practice-btn" onclick="openModal('modal-practice-guide')" title="Open Practice, Button Catalog & Viva Defense Guide">
-        <span>📖 Practice Guide</span>
+        <span>📖 Practice</span>
       </button>
       <button class="btn btn-secondary btn-sm nav-help-btn" onclick="openModal('modal-help')" title="Incident Response & Help Center">
         <span>❓ Help</span>
@@ -112,9 +124,9 @@
   </aside>
 
   <!-- Persistent Global Maintenance Mode Banner -->
-  <aside id="maintenance-banner" class="emergency-alert-banner" style="display: none; background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.6);" role="alert" aria-live="assertive">
+  <aside id="maintenance-banner" class="emergency-alert-banner" style="display: none; background: rgba(255, 159, 10, 0.1); border-color: rgba(255, 159, 10, 0.35);" role="alert" aria-live="assertive">
     <div class="banner-inner">
-      <div class="banner-icon-pulse" style="font-size: 1.6rem; filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.6));">🛠️</div>
+      <div class="banner-icon-pulse" style="font-size: 1.6rem;">🛠️</div>
       <div class="banner-content">
         <div class="banner-title" style="color: var(--accent-amber); font-weight: 700; font-family: var(--font-mono);">
           SYSTEM STATUS: SERVICE UNDER MAINTENANCE
@@ -144,7 +156,7 @@
         <div class="glass-panel auth-card">
           <div class="auth-header">
             <div class="auth-logo-box">
-              <span class="material-symbols-outlined" style="font-size: 2rem; color: var(--accent-emerald);">shield_lock</span>
+              <span class="material-symbols-outlined" style="font-size: 1.85rem; color: #ffffff;">shield_lock</span>
             </div>
             <h2 class="auth-title">User Account Portal</h2>
             <p class="auth-subtitle">Sign in to manage your approved devices and sessions.</p>
@@ -177,7 +189,7 @@
             <div class="form-group">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
                 <label class="form-label" for="login-password" style="margin-bottom: 0;">Password</label>
-                <a href="#" style="font-size: 0.8rem; color: var(--accent-cyan); text-decoration: none;" onclick="openModal('modal-forgot-password'); return false;">
+                <a href="#" style="font-size: 0.8rem; color: var(--text-secondary); text-decoration: none;" onclick="openModal('modal-forgot-password'); return false;">
                   Forgot password?
                 </a>
               </div>
@@ -187,15 +199,56 @@
               </div>
             </div>
 
-            <div style="background: rgba(9, 14, 25, 0.75); border: 1px dashed rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; font-size: 0.75rem; color: var(--text-secondary); display: flex; align-items: center; justify-content: space-between;">
+            <div style="background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm); padding: 0.75rem 1rem; margin-bottom: 0.75rem; font-size: 0.75rem; color: var(--text-secondary); display: flex; align-items: center; justify-content: space-between;">
               <span class="text-muted">Device ID:</span>
-              <span id="client-fp-display" style="color: var(--accent-cyan); font-family: var(--font-mono); font-weight: 600;">Checking...</span>
+              <span id="client-fp-display" style="color: var(--text-primary); font-family: var(--font-mono); font-weight: 600;">Checking...</span>
+            </div>
+
+            <!-- Network Origin & VPN Simulation Selector for Presentations -->
+            <div style="background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: var(--radius-sm); padding: 0.65rem 0.85rem; margin-bottom: 1.25rem;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.4rem; font-size: 0.75rem;">
+                <span style="color: #94a3b8; display: flex; align-items: center; gap: 0.35rem;">
+                  <span>🌐 Network Origin / VPN:</span>
+                </span>
+                <span id="origin-detect-badge" class="badge" style="font-size: 0.68rem; padding: 0.15rem 0.45rem; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">
+                  Detecting...
+                </span>
+              </div>
+              <div style="display: flex; gap: 0.4rem; align-items: center;">
+                <select id="login-vpn-preset" class="form-input" style="padding: 0.4rem 0.6rem; font-size: 0.78rem; background: #0b1329; color: #e2e8f0; border: 1px solid rgba(255, 255, 255, 0.12);" onchange="onVpnPresetChange(this.value)">
+                  <option value="AUTO" selected>🌐 Auto-Detected (Live IP / VPN Tunnel)</option>
+                  <option disabled>── 🚨 Critical Impossible Travel (Triggers Block & Mail) ──</option>
+                  <option value="133.242.18.5">🇯🇵 Tokyo, Japan (133.242.18.5) — VPN Exit / 8,500 km/h</option>
+                  <option value="185.220.101.5">🇬🇧 London, UK (185.220.101.5) — Tor Exit Relay</option>
+                  <option value="45.33.32.1">🇩🇪 Frankfurt, Germany (45.33.32.1) — Datacenter VPN</option>
+                  <option value="103.253.144.1">🇸🇬 Singapore (103.253.144.1) — Commercial VPN</option>
+                  <option value="185.100.87.5">🇳🇱 Amsterdam, NL (185.100.87.5) — Datacenter Proxy</option>
+                  <option value="198.98.56.2">🇨🇭 Zurich, CH (198.98.56.2) — Swiss Privacy VPN</option>
+                  <option value="162.247.74.200">🇦🇺 Sydney, AU (162.247.74.200) — Cloudflare WARP</option>
+                  <option disabled>── 🚗 Human Coverable Regional Travel (Model Handles / No Spam Mail) ──</option>
+                  <option value="198.51.100.42">🇺🇸 Philadelphia, PA (198.51.100.42) — ~150 km Commute</option>
+                  <option value="198.51.100.88">🇺🇸 Boston, MA (198.51.100.88) — ~300 km Regional</option>
+                  <option value="198.51.100.1">🇺🇸 New York, NY (198.51.100.1) — Clean Base Location</option>
+                </select>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="refreshClientOrigin()" style="padding: 0.4rem 0.55rem; font-size: 0.75rem;" title="Refresh live network origin and GeoIP detection">
+                  🔄
+                </button>
+              </div>
+              <div id="origin-detail-text" style="margin-top: 0.35rem; font-size: 0.7rem; color: #64748b; font-family: var(--font-mono);">
+                Local Residential Base (New York, US)
+              </div>
             </div>
 
             <button type="submit" id="btn-login-submit" class="btn btn-primary" style="width: 100%; padding: 0.75rem;">
               <span class="material-symbols-outlined" style="font-size: 1.1rem;">login</span>
               <span>Sign In</span>
             </button>
+
+            <div style="margin-top: 0.85rem; text-align: center;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="openDispatchedMailbox()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.45rem; padding: 0.55rem; font-size: 0.8rem; border-color: rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.08); color: #bae6fd;" title="Open simulated Amazon SNS & Email inbox, password recovery tokens, and security alerts">
+                <span>📧 View Dispatched SNS / Security Emails</span>
+              </button>
+            </div>
           </form>
 
           <!-- Registration Form -->
@@ -250,24 +303,24 @@
                 </h1>
                 <span id="user-display-status" class="capsule-badge capsule-emerald">ACTIVE</span>
                 <span id="user-role-badge" class="capsule-badge capsule-amber font-mono" style="display: none;">
-                  <span class="pulse-dot pulse-dot-emerald"></span>👑 ROOT ADMIN
+                  <span class="pulse-dot pulse-dot-amber"></span>👑 ROOT ADMIN
                 </span>
-                <span id="user-device-tier-badge" class="capsule-badge capsule-emerald">
+                <span id="user-device-tier-badge" class="capsule-badge capsule-silver">
                   <span class="pulse-dot pulse-dot-emerald"></span>PRIMARY DEVICE
-                </span>
-                <span id="user-mfa-badge" class="capsule-badge capsule-emerald" title="Zero-Trust Adaptive Multi-Factor Authentication is active">
-                  <span class="pulse-dot pulse-dot-emerald"></span>🛡️ MFA: ACTIVE (ZERO-TRUST)
-                </span>
-                <span id="btn-desktop-notif-status" class="capsule-badge capsule-cyan" style="cursor: pointer;" onclick="toggleDesktopNotifications()" title="Desktop system notifications status">
-                  <span class="pulse-dot pulse-dot-cyan"></span>🔔 DESKTOP ALERTS: ACTIVE
                 </span>
               </div>
               <div class="portal-hud-meta">
-                <span>Account: <strong id="user-display-email" class="text-cyan font-mono">email@domain.com</strong></span>
+                <span class="meta-item">Account: <strong id="user-display-email" class="font-mono text-white">email@domain.com</strong></span>
                 <span class="meta-separator">•</span>
-                <span>Last Login: <span id="user-last-login" class="text-secondary">New York (Desktop)</span></span>
+                <span class="meta-item">Last Login: <span id="user-last-login" class="text-secondary">New York (Desktop)</span></span>
                 <span class="meta-separator">•</span>
-                <span class="text-muted">Protection: <span class="text-emerald font-medium">ACTIVE</span></span>
+                <span id="user-mfa-badge" class="hud-inline-chip" title="Zero-Trust Adaptive Multi-Factor Authentication is active">
+                  <span class="pulse-dot pulse-dot-emerald"></span>MFA: ACTIVE
+                </span>
+                <span class="meta-separator">•</span>
+                <span id="btn-desktop-notif-status" class="hud-inline-chip meta-chip-interactive" onclick="toggleDesktopNotifications()" title="Desktop system notifications status">
+                  <span class="pulse-dot pulse-dot-cyan"></span>DESKTOP ALERTS: ACTIVE
+                </span>
               </div>
             </div>
           </div>
@@ -276,7 +329,7 @@
           <div class="portal-hud-right">
             <div class="posture-chip">
               <div class="posture-label">Account Risk</div>
-              <div class="posture-value text-emerald">
+              <div class="posture-value">
                 <span class="pulse-dot pulse-dot-emerald"></span>
                 Safe (Low Risk)
               </div>
@@ -303,7 +356,7 @@
         </section>
 
         <!-- Primary Device Self-Unfreeze Alert Banner (Shown if account status is LOCKED but accessed from Primary Device) -->
-        <div id="primary-unfreeze-banner" class="glass-panel" style="display: none; background: rgba(239, 68, 68, 0.12); border: 1px solid var(--accent-crimson); margin-bottom: 1.2rem; padding: 0.9rem 1.2rem; border-radius: 8px;">
+        <div id="primary-unfreeze-banner" class="glass-panel" style="display: none; background: rgba(255, 69, 58, 0.08); border: 1px solid rgba(255, 69, 58, 0.28); margin-bottom: 1.2rem; padding: 0.9rem 1.2rem; border-radius: var(--radius-lg);">
           <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.8rem;">
             <div style="display: flex; align-items: center; gap: 0.8rem;">
               <span class="material-symbols-outlined" style="font-size: 1.8rem; color: var(--accent-crimson);">lock</span>
@@ -356,7 +409,7 @@
               </div>
             </div>
             <div class="bento-footer">
-              <span class="bento-sub text-emerald">
+              <span class="bento-sub">
                 <span class="pulse-dot pulse-dot-emerald"></span>All checks normal
               </span>
               <span class="bento-badge">ACTIVE</span>
@@ -378,7 +431,7 @@
               </div>
             </div>
             <div class="bento-footer">
-              <span class="bento-sub text-cyan">
+              <span class="bento-sub">
                 <span class="pulse-dot pulse-dot-cyan"></span>Main device active
               </span>
               <span class="bento-badge" id="metric-devices-badge">VERIFIED</span>
@@ -397,7 +450,7 @@
               </div>
             </div>
             <div class="bento-footer">
-              <span class="bento-sub text-cyan">
+              <span class="bento-sub">
                 <span class="pulse-dot pulse-dot-emerald"></span>Encrypted & secure
               </span>
               <span class="bento-badge" id="metric-sessions-footer">SYNCED</span>
@@ -409,14 +462,14 @@
             <div class="bento-header">
               <div>
                 <span class="bento-label">SECURITY STATUS</span>
-                <span class="bento-value text-emerald">Safe</span>
+                <span class="bento-value">Safe</span>
               </div>
               <div class="bento-icon-box bento-icon-crimson">
                 <span class="material-symbols-outlined">shield</span>
               </div>
             </div>
             <div class="bento-footer">
-              <span class="bento-sub text-emerald">
+              <span class="bento-sub">
                 <span class="pulse-dot pulse-dot-emerald"></span>Automatic protection on
               </span>
               <span class="bento-badge">ENABLED</span>
@@ -467,7 +520,7 @@
                     </div>
                     <div>
                       <span class="td-meta-label">Security:</span>
-                      <span class="td-meta-val text-emerald font-medium">Verified Device</span>
+                      <span class="td-meta-val font-medium"><span class="pulse-dot pulse-dot-emerald" style="margin-right: 4px;"></span>Verified Device</span>
                     </div>
                     <div>
                       <span class="td-meta-label">Location:</span>
@@ -475,7 +528,7 @@
                     </div>
                     <div>
                       <span class="td-meta-label">Status:</span>
-                      <span class="td-meta-val text-cyan">🟢 Connected</span>
+                      <span class="td-meta-val"><span class="pulse-dot pulse-dot-emerald" style="margin-right: 4px;"></span>Connected</span>
                     </div>
                   </div>
                 </div>
@@ -649,7 +702,7 @@
             </div>
           </div>
           <div class="portal-footer-actions">
-            <button class="btn btn-secondary btn-sm" onclick="openModal('modal-reset-password')">
+            <button class="btn btn-secondary btn-sm" onclick="openPasswordModal('auth')">
               <span class="material-symbols-outlined" style="font-size: 0.95rem;">key</span>
               <span>Change Password</span>
             </button>
@@ -675,11 +728,23 @@
         </p>
       </div>
 
-      <div class="cyber-card" style="margin-bottom: 1.5rem;">
-        <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-          <label class="form-label" for="sim-target-email" style="margin-bottom: 0;">Target Account Email:</label>
-          <input type="email" id="sim-target-email" class="form-input" style="max-width: 340px;" placeholder="user@domain.com">
-          <span style="font-size: 0.8rem; color: var(--text-dim);">Simulates attacks targeting this user profile's learned baseline.</span>
+      <div class="cyber-card target-profile-card" style="margin-bottom: 1.5rem;">
+        <div class="target-profile-bar">
+          <div class="target-profile-info">
+            <span class="target-profile-badge">
+              <span class="target-lock-icon">🔒</span> TARGET ACCOUNT
+            </span>
+            <label class="target-profile-label" for="sim-target-email">Active Baseline:</label>
+            <div class="target-account-capsule" title="Target account is locked to the authenticated user profile and cannot be modified.">
+              <span class="target-account-email-display" id="sim-target-email-text">demo@awssecurity.io</span>
+              <input type="hidden" id="sim-target-email" value="demo@awssecurity.io" readonly aria-readonly="true">
+              <span class="capsule-locked-indicator">LOCKED</span>
+            </div>
+          </div>
+          <div class="target-profile-meta">
+            <span class="pulse-dot pulse-dot-emerald"></span>
+            <span>Attacks strictly target this active account's learned baseline. Manual modification is disabled for safety.</span>
+          </div>
         </div>
       </div>
 
@@ -763,12 +828,30 @@
             </div>
           </div>
           <div>
-            <label class="form-label" for="custom-ip-input" style="margin-bottom: 0.35rem; font-size: 0.8rem;">
-              Simulated Attacker Origin IP:
-            </label>
-            <input type="text" id="custom-ip-input" class="form-input" value="185.220.101.5" placeholder="e.g. 185.220.101.5 (Tor) or 45.33.32.156 (VPN)">
-            <div style="font-size: 0.7rem; color: var(--text-dim); margin-top: 0.2rem;">
-              Tor ranges (185.220.*) or Datacenter ranges (45.33.*) trigger distinct ML feature weights.
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <label class="form-label" for="custom-ip-input" style="margin-bottom: 0; font-size: 0.8rem;">
+                Simulated Attacker Origin IP:
+              </label>
+              <span class="capsule-locked-indicator" style="font-size: 0.6rem;">🔒 LOCKED VECTOR</span>
+            </div>
+            <div class="target-account-capsule" style="width: 100%; justify-content: space-between; margin-bottom: 0.45rem;">
+              <span class="target-account-email-display" id="custom-ip-display">185.220.101.5</span>
+              <input type="hidden" id="custom-ip-input" value="185.220.101.5" readonly aria-readonly="true">
+              <span id="custom-ip-type-badge" class="badge badge-critical" style="font-size: 0.62rem;">TOR EXIT RELAY</span>
+            </div>
+            <div class="ip-preset-buttons" style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.4rem;">
+              <button type="button" class="btn btn-secondary btn-sm ip-preset-btn active" onclick="selectAttackIp('185.220.101.5', 'TOR EXIT RELAY', 'badge-critical', this)" style="padding: 0.22rem 0.6rem; font-size: 0.72rem;">
+                🧅 Tor (185.220.101.5)
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm ip-preset-btn" onclick="selectAttackIp('45.33.32.156', 'DATACENTER VPN', 'badge-medium', this)" style="padding: 0.22rem 0.6rem; font-size: 0.72rem;">
+                🏢 Datacenter (45.33.32.156)
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm ip-preset-btn" onclick="selectAttackIp('198.51.100.1', 'RESIDENTIAL PROXY', 'badge-low', this)" style="padding: 0.22rem 0.6rem; font-size: 0.72rem;">
+                🌐 Residential (198.51.100.1)
+              </button>
+            </div>
+            <div style="font-size: 0.7rem; color: #cbd5e1; margin-top: 0.4rem;">
+              Calibrated ML anomaly vectors. Direct manual keyboard typing disabled for vector consistency.
             </div>
           </div>
         </div>
@@ -855,13 +938,54 @@
 
         <!-- Interactive Impossible Travel Visualizer -->
         <div class="cyber-card">
-          <div class="card-header">
-            <div class="card-title">Geo-Velocity Travel Map Visualizer</div>
-            <span class="badge badge-medium">Impossible Flight Check</span>
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <div class="card-title">🌐 Global Geo-Velocity Cyber Map Visualizer</div>
+            <div style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;">
+              <span id="flight-risk-badge" class="badge badge-critical font-mono">⚡ IMPOSSIBLE FLIGHT: 8,500 KM/H</span>
+            </div>
           </div>
-          <canvas id="geo-flight-canvas" class="flight-visualizer-canvas"></canvas>
-          <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.6rem; text-align: center;">
-            Haversine Great-Circle velocity formula calculating travel velocity (v = d / Δt) between consecutive origins.
+
+          <!-- Quick Scenario Flight Route Selector -->
+          <div class="flight-preset-bar" style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+            <button type="button" class="btn btn-secondary btn-sm flight-route-btn active" onclick="selectFlightRoute('Tokyo', 35.6762, 139.6503, 8500, true, this)">
+              🇯🇵 Tokyo (8,500 km/h • Critical Anomaly)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm flight-route-btn" onclick="selectFlightRoute('London', 51.5074, -0.1278, 6200, true, this)">
+              🇬🇧 London (6,200 km/h • Transatlantic)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm flight-route-btn" onclick="selectFlightRoute('Sydney', -33.8688, 151.2093, 16000, true, this)">
+              🇦🇺 Sydney (16,000 km/h • Trans-Pacific)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm flight-route-btn" onclick="selectFlightRoute('Philadelphia', 39.9526, -75.1652, 45, false, this)">
+              🚗 Philadelphia (45 km/h • Normal Commute)
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm flight-route-btn" onclick="selectFlightRoute('Frankfurt', 50.1109, 8.6821, 7100, true, this)">
+              🏢 Frankfurt (7,100 km/h • Datacenter Hop)
+            </button>
+          </div>
+
+          <div style="position: relative; overflow: hidden; border-radius: var(--radius-md); border: 1px solid rgba(255, 255, 255, 0.12);">
+            <canvas id="geo-flight-canvas" class="flight-visualizer-canvas" style="width: 100%; height: 340px; display: block;"></canvas>
+            <!-- Tactical HUD Telemetry Overlay -->
+            <div class="flight-hud-overlay" id="flight-hud-overlay">
+              <div class="flight-hud-panel flight-hud-left">
+                <div class="hud-stat-label">ORIGIN BASELINE</div>
+                <div class="hud-stat-value" id="hud-origin-val">🗽 New York, USA [40.7°N, 74.0°W]</div>
+                <div class="hud-stat-label" style="margin-top: 6px;">CURRENT ACCESS VECTOR</div>
+                <div class="hud-stat-value text-crimson" id="hud-dest-val">🗼 Tokyo, Japan [35.7°N, 139.7°E]</div>
+              </div>
+              <div class="flight-hud-panel flight-hud-right">
+                <div class="hud-stat-label">GREAT-CIRCLE DISTANCE</div>
+                <div class="hud-stat-value font-mono" id="hud-dist-val">10,848 km (6,741 mi)</div>
+                <div class="hud-stat-label" style="margin-top: 6px;">VELOCITY VECTOR (d/Δt)</div>
+                <div class="hud-stat-value font-mono text-crimson" id="hud-speed-val">8,500 km/h (Mach 6.88)</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="font-size: 0.76rem; color: #cbd5e1; margin-top: 0.65rem; text-align: center; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <span>🌐 Haversine Geodesic: <code>v = 2R · arcsin(√[sin²(Δφ/2) + cos φ₁ cos φ₂ sin²(Δλ/2)]) / Δt</code></span>
+            <span class="capsule-badge capsule-emerald font-mono"><span class="pulse-dot pulse-dot-emerald"></span>LIVE RADAR TRACKING</span>
           </div>
         </div>
       </div>
@@ -872,7 +996,14 @@
           <div class="card-title">
             <span>🛡️ Real-Time Security Event Stream</span>
           </div>
-          <button class="btn btn-secondary btn-sm" onclick="loadSecurityEvents()">Refresh Stream</button>
+          <div style="display: flex; gap: 0.45rem;">
+            <button class="btn btn-secondary btn-sm" onclick="loadSecurityEvents(true)" title="Reload latest events from server">
+              🔄 Refresh Stream
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="clearSecurityEvents()" title="Clear all recorded login and security events" style="border-color: rgba(239, 68, 68, 0.35); color: #fca5a5;">
+              🗑️ Clear Events
+            </button>
+          </div>
         </div>
         <div class="cyber-table-wrapper">
           <table class="cyber-table" aria-label="Security events stream">
@@ -951,14 +1082,20 @@
       <div class="cyber-card">
         <div class="card-header">
           <div class="card-title">CloudWatch Log Stream Viewer (/aws/lambda/AccountHijackRiskEngine)</div>
-          <div style="display: flex; gap: 0.5rem;">
-            <input type="text" id="cw-log-search" class="form-input" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; width: 220px;" placeholder="Search logs..." oninput="filterCloudWatchLogs()">
-            <select id="cw-log-level-filter" class="form-select" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; width: 110px;" onchange="filterCloudWatchLogs()">
+          <div style="display: flex; gap: 0.45rem; align-items: center; flex-wrap: wrap;">
+            <input type="text" id="cw-log-search" class="form-input" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; width: 180px;" placeholder="Search logs..." oninput="filterCloudWatchLogs()">
+            <select id="cw-log-level-filter" class="form-select" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; width: 105px;" onchange="filterCloudWatchLogs()">
               <option value="ALL">All Levels</option>
               <option value="INFO">INFO</option>
               <option value="WARN">WARN</option>
               <option value="ERROR">ERROR</option>
             </select>
+            <button class="btn btn-secondary btn-sm" onclick="loadCloudWatchTelemetry()" title="Refresh CloudWatch logs and metrics">
+              🔄 Refresh
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="clearCloudWatchLogs()" title="Clear all CloudWatch logs and reset metrics" style="border-color: rgba(239, 68, 68, 0.35); color: #fca5a5;">
+              🗑️ Clear Logs
+            </button>
           </div>
         </div>
         <div class="cyber-table-wrapper">
@@ -1131,7 +1268,7 @@
         </h2>
       </div>
       <p id="mfa-modal-desc" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.2rem; line-height: 1.5;">
-        A 6-digit verification code has been dispatched to your <strong class="text-cyan font-mono">Primary Device</strong> screen. Check your primary device to view the code or allow access.
+        A 6-digit verification code has been dispatched to your <strong id="mfa-target-device" class="text-cyan font-mono">Primary Security Portal</strong> screen. Check your primary device to view the code or allow access.
       </p>
 
       <form id="form-verify-mfa" onsubmit="handleVerifyMFA(event)">
@@ -1161,10 +1298,10 @@
 
   <!-- Modal: Primary Device Incoming Secondary Login Approval -->
   <div id="modal-secondary-device-approval" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="sec-approval-title">
-    <div class="cyber-modal-box" style="border-color: rgba(16, 185, 129, 0.5); box-shadow: 0 0 35px rgba(16, 185, 129, 0.25);">
+    <div class="cyber-modal-box" style="border-color: rgba(52, 199, 89, 0.35);">
       <button class="modal-close-btn" onclick="closeModal('modal-secondary-device-approval'); stopTitlePulse();" aria-label="Close dialog">✕</button>
       <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem;">
-        <div style="width: 36px; height: 36px; border-radius: 50%; background: rgba(16, 185, 129, 0.15); display: flex; align-items: center; justify-content: center; color: var(--accent-emerald);">
+        <div style="width: 36px; height: 36px; border-radius: 50%; background: rgba(52, 199, 89, 0.12); display: flex; align-items: center; justify-content: center; color: var(--accent-emerald);">
           <span class="material-symbols-outlined">security_update_good</span>
         </div>
         <div>
@@ -1200,7 +1337,7 @@
         <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 0.4rem;">
           Verification Code (For Secondary Device)
         </div>
-        <div id="sec-approval-code" style="font-size: 2.2rem; font-family: var(--font-mono); font-weight: 800; letter-spacing: 0.25em; color: var(--accent-emerald); text-shadow: 0 0 15px rgba(16, 185, 129, 0.6); padding: 0.6rem 1rem; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; display: inline-block;">
+        <div id="sec-approval-code" style="font-size: 2rem; font-family: var(--font-mono); font-weight: 700; letter-spacing: 0.2em; color: #ffffff; padding: 0.6rem 1.2rem; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: var(--radius-md); display: inline-block;">
           ------
         </div>
       </div>
@@ -1208,7 +1345,7 @@
       <input type="hidden" id="sec-approval-token-hidden">
 
       <div style="display: flex; gap: 0.6rem;">
-        <button type="button" class="btn btn-primary" style="flex: 1; background: linear-gradient(135deg, #10b981, #059669); font-weight: 700; border: none; box-shadow: 0 0 20px rgba(16, 185, 129, 0.45); padding: 0.65rem 1rem;" onclick="executeApproveSecondary(true)">
+        <button type="button" class="btn btn-success" style="flex: 1; padding: 0.65rem 1rem;" onclick="executeApproveSecondary(true)">
           <span class="material-symbols-outlined" style="font-size: 1.1rem;">check_circle</span>
           <span>Allow Sign-In (1-Click)</span>
         </button>
@@ -1305,42 +1442,157 @@
       <h2 id="forgot-modal-title" style="color: #fff; font-size: 1.25rem; margin-bottom: 0.5rem;">
         Reset Account Password
       </h2>
-      <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
-        Enter your registered email address. To prevent user enumeration, a generic confirmation will be returned.
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.85rem; line-height: 1.5;">
+        Enter your registered email address. A single-use recovery token will be dispatched directly to your inbox via <strong>Amazon SNS / SES</strong>.
       </p>
       <form onsubmit="handleForgotPassword(event)">
         <div class="form-group">
           <label class="form-label" for="forgot-email">Account Email</label>
           <input type="email" id="forgot-email" class="form-input" placeholder="user@domain.com" required>
         </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%;">
-          Send Recovery Link
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-bottom: 0.75rem;">
+          🚀 Dispatch Recovery Email via Amazon SNS
         </button>
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
+          <span>Need to see outgoing messages?</span>
+          <a href="#" onclick="openDispatchedMailbox(); return false;" style="color: #38bdf8; text-decoration: underline; font-weight: 500;">
+            📧 Open SNS Inbox
+          </a>
+        </div>
       </form>
     </div>
   </div>
 
-  <!-- Modal: Reset Password with Token -->
+  <!-- Modal: Dispatched Notifications (Amazon SNS & Email Inbox) -->
+  <div id="modal-dispatched-notifications" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="sns-inbox-title">
+    <div class="cyber-modal-box" style="max-width: 740px; max-height: 88vh; display: flex; flex-direction: column;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
+        <div>
+          <h2 id="sns-inbox-title" style="color: #fff; font-size: 1.25rem; margin: 0 0 0.25rem;">
+            📧 Amazon SNS & Security Notification Mailbox
+          </h2>
+          <p style="font-size: 0.82rem; color: var(--text-muted); margin: 0;">
+            Live telemetry of security notices, password reset tokens, MFA verification codes, and incident alerts delivered to users.
+          </p>
+        </div>
+        <button class="modal-close-btn" onclick="closeModal('modal-dispatched-notifications')" aria-label="Close dialog" style="position: static;">✕</button>
+      </div>
+
+      <!-- Quick Metrics Bar -->
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-bottom: 0.85rem; background: rgba(15, 23, 42, 0.6); padding: 0.6rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.08);">
+        <div style="text-align: center;">
+          <div style="font-size: 0.68rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Dispatch Engine</div>
+          <div id="sns-status-badge" style="font-size: 0.8rem; font-weight: 600; color: #38bdf8; margin-top: 2px;">Amazon SNS Topic</div>
+        </div>
+        <div style="text-align: center; border-left: 1px solid rgba(255, 255, 255, 0.08); border-right: 1px solid rgba(255, 255, 255, 0.08);">
+          <div style="font-size: 0.68rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Messages Sent</div>
+          <div id="sns-total-count" style="font-size: 0.8rem; font-weight: 600; color: #10b981; margin-top: 2px;">0</div>
+        </div>
+        <div style="text-align: center;">
+          <div style="font-size: 0.68rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px;">Live Stream</div>
+          <div style="font-size: 0.8rem; font-weight: 600; color: #a855f7; margin-top: 2px;">● SSE Active</div>
+        </div>
+      </div>
+
+      <!-- Delivery Mode & Real Gmail Setup Callout -->
+      <div id="sns-delivery-guidance" style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 6px; padding: 0.55rem 0.85rem; margin-bottom: 0.85rem; font-size: 0.74rem; color: #94a3b8; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="font-size: 1rem;">ℹ️</span>
+          <span>
+            <strong style="color: #f1f5f9;">Offline Local Mode:</strong> All dispatched emails, OTPs, and recovery tokens are delivered instantly right here.
+          </span>
+        </div>
+        <div style="font-size: 0.72rem; color: #38bdf8;">
+          Want real Gmail delivery? Add your Gmail App Password to <code>.env</code> (see <code>.env.example</code>).
+        </div>
+      </div>
+
+      <!-- Action toolbar -->
+      <div style="display: flex; gap: 0.5rem; margin-bottom: 0.85rem; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
+          <button class="btn btn-secondary btn-sm" onclick="fetchDispatchedNotifications()" title="Reload dispatched messages from server">
+            🔄 Refresh
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="sendTestSNSNotification()" title="Send diagnostic test notification to current account">
+            🧪 Send Test SNS Alert
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="clearDispatchedNotifications()" title="Clear all dispatched emails and reset tokens" style="border-color: rgba(239, 68, 68, 0.35); color: #fca5a5;">
+            🗑️ Clear Mailbox
+          </button>
+        </div>
+        <input type="text" id="sns-search-input" placeholder="Filter recipient/subject..." oninput="filterDispatchedNotifications()" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; padding: 0.3rem 0.6rem; font-size: 0.78rem; color: #fff; width: 190px;">
+      </div>
+
+      <!-- Scrollable Message List -->
+      <div id="dispatched-notifications-list" style="overflow-y: auto; flex: 1; max-height: 48vh; min-height: 220px; display: flex; flex-direction: column; gap: 0.6rem; padding-right: 4px;">
+        <div style="text-align: center; color: var(--text-muted); padding: 2rem; font-size: 0.85rem;">
+          Loading dispatched notifications...
+        </div>
+      </div>
+
+      <div style="margin-top: 0.75rem; padding-top: 0.6rem; border-top: 1px solid rgba(255, 255, 255, 0.08); display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: var(--text-muted);">
+        <span>CloudWatch Log Group: <code>/aws/lambda/NotificationDispatcher</code></span>
+        <button class="btn btn-secondary btn-sm" onclick="closeModal('modal-dispatched-notifications')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Reset / Rotate Password -->
   <div id="modal-reset-password" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="reset-modal-title">
-    <div class="cyber-modal-box">
+    <div class="cyber-modal-box" style="max-width: 480px;">
       <button class="modal-close-btn" onclick="closeModal('modal-reset-password')" aria-label="Close dialog">✕</button>
-      <h2 id="reset-modal-title" style="color: #fff; font-size: 1.25rem; margin-bottom: 0.5rem;">
+      <h2 id="reset-modal-title" style="color: #fff; font-size: 1.25rem; margin-bottom: 0.35rem;">
         Rotate / Update Password
       </h2>
-      <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
-        Provide your single-use recovery token and specify your new secure password.
+      <p style="font-size: 0.82rem; color: #cbd5e1; margin-bottom: 1rem;">
+        Update your master credentials. All previous or remote attacker sessions will be immediately invalidated.
       </p>
-      <form onsubmit="handleResetPassword(event)">
+
+      <!-- Mode Selector Tabs -->
+      <div class="auth-tabs" style="margin-bottom: 1.1rem; display: flex; gap: 0.35rem;">
+        <button type="button" id="tab-pw-auth" class="auth-tab-btn active" onclick="switchPasswordMode('auth')" style="flex: 1; font-size: 0.78rem; padding: 0.45rem;">
+          🔑 Current Password
+        </button>
+        <button type="button" id="tab-pw-token" class="auth-tab-btn" onclick="switchPasswordMode('token')" style="flex: 1; font-size: 0.78rem; padding: 0.45rem;">
+          🎟️ Single-Use Token
+        </button>
+      </div>
+
+      <!-- Mode A: Direct Authenticated Password Change -->
+      <form id="form-change-password-auth" onsubmit="handleChangePasswordAuth(event)">
         <div class="form-group">
-          <label class="form-label" for="reset-token-input">Reset Token</label>
-          <input type="text" id="reset-token-input" class="form-input" style="font-family: var(--font-mono);" required placeholder="Paste token">
+          <label class="form-label" for="change-curr-password">Current Master Password</label>
+          <input type="password" id="change-curr-password" class="form-input" required placeholder="Enter current password">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="change-new-password">New Master Password</label>
+          <input type="password" id="change-new-password" class="form-input" required placeholder="Min 8 chars with mixed cases & numbers">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.4rem;">
+          Update Master Password & Invalidate Other Sessions
+        </button>
+      </form>
+
+      <!-- Mode B: Token Recovery Reset -->
+      <form id="form-reset-password-token" onsubmit="handleResetPassword(event)" style="display: none;">
+        <div class="form-group">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
+            <label class="form-label" for="reset-token-input" style="margin-bottom: 0;">Reset Token</label>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="autoGenerateResetToken()" style="padding: 0.15rem 0.5rem; font-size: 0.70rem;">
+              🔑 Auto-Generate Demo Token
+            </button>
+          </div>
+          <input type="text" id="reset-token-input" class="form-input" style="font-family: var(--font-mono);" placeholder="Paste single-use recovery token">
+          <div style="font-size: 0.70rem; color: #94a3b8; margin-top: 0.25rem;">
+            Generated via "Forgot Password" or click "Auto-Generate Demo Token" above.
+          </div>
         </div>
         <div class="form-group">
           <label class="form-label" for="reset-new-password">New Master Password</label>
-          <input type="password" id="reset-new-password" class="form-input" required placeholder="Min 8 chars with mixed cases & numbers">
+          <input type="password" id="reset-new-password" class="form-input" placeholder="Min 8 chars with mixed cases & numbers">
         </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%;">
-          Update Password & Invalidate Other Sessions
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.4rem;">
+          Reset Password with Recovery Token
         </button>
       </form>
     </div>
@@ -1683,9 +1935,6 @@
 
   <!-- Footer -->
   <footer class="footer" role="contentinfo">
-    <div>
-      © 2026 <strong>RootNode-Rebels Security Research</strong>. All rights reserved.
-    </div>
     <div class="footer-links">
       <span class="footer-link" onclick="showLegalDoc('privacy')">Privacy Policy</span>
       <span class="footer-link" onclick="showLegalDoc('terms')">Terms of Service</span>
@@ -1696,16 +1945,16 @@
     </div>
   </footer>
 
-  <!-- Scripts -->
-  <script src="/static/js/bg_animation.js?v=2.7.0"></script>
-  <script src="/static/js/fingerprint.js?v=2.7.0"></script>
-  <script src="/static/js/legal_views.js?v=2.7.0"></script>
-  <script src="/static/js/user_portal.js?v=2.7.0"></script>
-  <script src="/static/js/attack_simulator.js?v=2.7.0"></script>
-  <script src="/static/js/soc_dashboard.js?v=2.7.0"></script>
-  <script src="/static/js/cloudwatch_view.js?v=2.7.0"></script>
-  <script src="/static/js/cms_dashboard.js?v=2.7.0"></script>
-  <script src="/static/js/app.js?v=2.7.0"></script>
+  <!-- Scripts: app.js loaded first so AppState, apiFetch, and openModal are available to all modules -->
+  <script src="/static/js/app.js?v=4.0.0-clean"></script>
+  <script src="/static/js/bg_animation.js?v=4.0.0-clean"></script>
+  <script src="/static/js/fingerprint.js?v=4.0.0-clean"></script>
+  <script src="/static/js/legal_views.js?v=4.0.0-clean"></script>
+  <script src="/static/js/user_portal.js?v=4.2.0-auth-hidden"></script>
+  <script src="/static/js/attack_simulator.js?v=4.0.0-clean"></script>
+  <script src="/static/js/soc_dashboard.js?v=4.0.0-clean"></script>
+  <script src="/static/js/cloudwatch_view.js?v=4.0.0-clean"></script>
+  <script src="/static/js/cms_dashboard.js?v=4.0.0-clean"></script>
 
   <script>
     function switchAuthTab(mode) {

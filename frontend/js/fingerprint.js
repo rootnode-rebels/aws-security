@@ -80,6 +80,26 @@ async function generateCanvasHash() {
 }
 
 async function getClientGeolocation() {
+  try {
+    const res = await fetch("/api/security/detect-client-ip");
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.geo) {
+        return {
+          lat: Number(data.geo.lat || 40.7128),
+          lon: Number(data.geo.lon || -74.0060),
+          city: data.city || data.geo.city || "New York",
+          country: data.country || data.geo.country || "US",
+          ip: data.ip || "127.0.0.1",
+          is_vpn: Boolean(data.is_vpn),
+          provider: data.provider || "Residential ISP"
+        };
+      }
+    }
+  } catch (err) {
+    // Continue to browser fallback
+  }
+
   return new Promise((resolve) => {
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
@@ -95,10 +115,11 @@ async function getClientGeolocation() {
           // Default fallback (New York, US)
           resolve({ lat: 40.7128, lon: -74.0060, city: "New York", country: "US" });
         },
-        { timeout: 3000 }
+        { timeout: 2000 }
       );
     } else {
       resolve({ lat: 40.7128, lon: -74.0060, city: "New York", country: "US" });
     }
   });
 }
+

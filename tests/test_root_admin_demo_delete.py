@@ -77,7 +77,8 @@ class TestRootAdminAndDemoDeletion(unittest.TestCase):
         if not demo_user:
             # Seed demo user
             db.get_collection("system_metadata").delete_many({"key": "initial_seed_completed"})
-            seed_demo_user_if_needed()
+            db.get_collection("system_metadata").delete_many({"key": f"deleted_user_{demo_email}"})
+            seed_demo_user_if_needed(force=True)
             demo_user = db.users.find_one({"email": demo_email})
 
         self.assertIsNotNone(demo_user, "demo@awssecurity.io must be present before test deletion")
@@ -98,7 +99,7 @@ class TestRootAdminAndDemoDeletion(unittest.TestCase):
 
         # Restore demo account for continued testing if desired
         db.get_collection("system_metadata").delete_many({"key": "initial_seed_completed"})
-        seed_demo_user_if_needed()
+        seed_demo_user_if_needed(force=True)
 
     def test_03_maintenance_mode_and_root_admin_control(self):
         """Verify maintenance mode broadcasts status and allows Root Admin override."""

@@ -19,8 +19,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./backend/
 COPY database/ ./database/
 COPY frontend/ ./frontend/
-COPY data/ ./data/
 COPY run_standalone.py .
+
+# Ensure data storage directory exists
+RUN mkdir -p /app/data
 
 # Environment Defaults: Standalone Zero-AWS Mode
 ENV DEPLOYMENT_MODE="STANDALONE_LOCAL"

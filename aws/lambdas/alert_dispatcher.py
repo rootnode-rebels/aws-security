@@ -4,7 +4,10 @@ Sends instant push and email notifications to the legitimate user upon account h
 """
 import json
 import os
-import boto3
+try:
+    import boto3
+except ImportError:
+    boto3 = None
 
 def lambda_handler(event, context):
     try:
@@ -29,13 +32,23 @@ def lambda_handler(event, context):
     )
 
     sns_arn = os.getenv("SECURITY_ALERT_TOPIC_ARN")
-    if sns_arn and not sns_arn.startswith("arn:aws:sns:dummy"):
+    if sns_arn and not sns_arn.startswith("arn:aws:sns:dummy") and boto3:
         try:
             sns = boto3.client("sns")
             sns.publish(
                 TopicArn=sns_arn,
-                Subject=f"🚨 High Risk Security Alert: {user_email}",
-                Message=alert_message
+                Subject=f"🚨 High Risk Security Alert: {user_email}"[:100],
+                Message=alert_message,
+                MessageAttributes={
+                    "recipient_email": {
+                        "DataType": "String",
+                        "StringValue": user_email
+                    },
+                    "notification_type": {
+                        "DataType": "String",
+                        "StringValue": "SECURITY_ALERT"
+                    }
+                }
             )
             print(f"[AlertDispatcher] SNS notification published to {sns_arn}")
         except Exception as e:

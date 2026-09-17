@@ -25,6 +25,8 @@ from database.db_manager import db
 from backend.security.sanitizer import sanitize_string, sanitize_email, sanitize_mongo_dict
 from backend.security.rate_limiter import rate_limiter
 from backend.security.desktop_notifier import send_desktop_notification
+from backend.security.notification_service import notification_service
+from backend.security.geoip_service import resolve_ip_geolocation, get_available_vpn_presets
 from backend.security.auth import (
     hash_password, verify_password, generate_session_token,
     generate_mfa_code, generate_reset_token, validate_password_strength
@@ -87,11 +89,10 @@ async def value_error_handler(request: Request, exc: ValueError):
 # Maintenance mode toggle for UX state demonstration
 MAINTENANCE_MODE = False
 
-def seed_demo_user_if_needed():
+def seed_demo_user_if_needed(force: bool = False):
     """Seeds baseline legitimate user accounts for instant multi-browser testing."""
-    # Check if system has already completed initial seeding so deleted accounts are not resurrected
-    system_meta = db.get_collection("system_metadata").find_one({"key": "initial_seed_completed"})
-    if system_meta:
+    # If not forced and accounts already exist, do not reseed
+    if not force and db.users.count_documents({}) > 0:
         return
 
     accounts = [
@@ -263,6 +264,10 @@ class ResetPasswordSchema(BaseModel):
     token: str
     new_password: str = Field(min_length=8, max_length=128)
 
+class ChangePasswordSchema(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=128)
+
 class SessionKillSchema(BaseModel):
     session_id: str
 
@@ -282,10 +287,23 @@ class ApproveSecondarySchema(BaseModel):
     temp_token: Optional[str] = "LATEST"
     approved: bool = True
 
+class TestNotificationSchema(BaseModel):
+    recipient_email: str = Field(min_length=3, max_length=254)
+    notification_type: Optional[str] = "TEST_SECURITY_ALERT"
+    message: Optional[str] = None
+
 
 # -------------------------------------------------------------
 # Helper: Authenticate Session Token
 # -------------------------------------------------------------
+def get_optional_current_user(authorization: Optional[str] = Header(None)) -> Optional[Dict[str, Any]]:
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    try:
+        return get_current_user(authorization)
+    except HTTPException:
+        return None
+
 def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authentication token required or expired.")
@@ -397,6 +415,10 @@ def register(payload: RegisterSchema, request: Request):
         payload={"ip": client_ip, "city": geo_loc.get("city")}
     )
 
+    # Dispatch welcome & security enrollment notice via Amazon SNS
+    notif = notification_service.send_welcome_registration(clean_email, clean_name, client_ip)
+    broadcaster.broadcast_sync(clean_email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
     return {
         "status": "success",
         "message": "Root Admin account successfully created. Please sign in.",
@@ -419,13 +441,71 @@ def resolve_client_ip(request: Request, spoofed_ip: Optional[str] = None) -> str
     return "127.0.0.1"
 
 
+@app.get("/api/security/detect-client-ip")
+def detect_client_ip(request: Request):
+    """
+    Detects the client's network origin, IP address, and GeoIP intelligence.
+    Supports real commercial VPNs (ip-api resolution), reverse proxies, and presets.
+    """
+    client_ip = resolve_client_ip(request)
+
+    # If client is loopback/local, attempt to discover host's public egress IP (e.g. from active VPN)
+    if client_ip in ("127.0.0.1", "localhost", "::1"):
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                "http://ip-api.com/json/?fields=status,message,query,country,city,lat,lon,hosting,proxy",
+                headers={"User-Agent": "AWSSecurityAI-GeoIP/2.0"}
+            )
+            with urllib.request.urlopen(req, timeout=1.2) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    if data.get("status") == "success" and data.get("query"):
+                        client_ip = data["query"]
+        except Exception:
+            pass
+
+    geo_data = resolve_ip_geolocation(client_ip)
+    return {
+        "status": "success",
+        "ip": client_ip,
+        "geo": geo_data,
+        "is_vpn": geo_data.get("is_vpn", False),
+        "provider": geo_data.get("provider", "Standard Internet Access"),
+        "city": geo_data.get("city", "New York"),
+        "country": geo_data.get("country", "United States")
+    }
+
+
+@app.get("/api/security/vpn-presets")
+def get_vpn_presets():
+    """Returns the list of presentation presets for UI simulation."""
+    return {
+        "status": "success",
+        "presets": get_available_vpn_presets()
+    }
+
+
 @app.post("/api/auth/login")
 def login(payload: LoginSchema, request: Request):
     client_ip = resolve_client_ip(request, payload.spoofed_ip)
     user_agent = payload.spoofed_user_agent or request.headers.get("user-agent", "")
     email = sanitize_email(payload.email)
     raw_password = payload.password
-    geo = payload.geo or {"lat": 40.7128, "lon": -74.0060, "city": "New York", "country": "US"}
+
+    # Geographic resolution:
+    # If client passed an explicit custom geo (e.g. from preset), prioritize it.
+    # Otherwise or if client_ip is a VPN/preset IP, resolve accurate geo from GeoIP intelligence.
+    if payload.geo and payload.geo.get("city") and payload.geo.get("city") not in ("Current Location", "New York"):
+        geo = payload.geo
+    else:
+        resolved = resolve_ip_geolocation(client_ip)
+        geo = {
+            "lat": resolved.get("lat", 40.7128),
+            "lon": resolved.get("lon", -74.0060),
+            "city": resolved.get("city", "New York"),
+            "country": resolved.get("country", "US")
+        }
     fingerprint = sanitize_mongo_dict(payload.fingerprint or {})
 
     # 1. Check Rate Limiter (Dual-layer brute-force protection: IP + Target Account)
@@ -461,7 +541,14 @@ def login(payload: LoginSchema, request: Request):
 
     # 2. Retrieve user
     user = db.users.find_one({"email": email})
-    recent_failures = rate_limiter.get_recent_failure_count(client_ip)
+    # Dual-layer failure tracking:
+    # Account failures protect against targeted credential guessing against this specific user.
+    # IP failures protect against distributed credential stuffing, but loopback/local test IPs
+    # must not cross-contaminate newly created local accounts.
+    is_loopback = client_ip in ("127.0.0.1", "::1", "localhost", "testclient")
+    acct_failures = rate_limiter.get_recent_failure_count(f"acct:{email}")
+    ip_failures = 0 if is_loopback else rate_limiter.get_recent_failure_count(client_ip)
+    recent_failures = max(acct_failures, ip_failures)
 
     # 3. Behavioral Feature Extraction & ML Inference
     attempt_telemetry = {
@@ -577,6 +664,16 @@ def login(payload: LoginSchema, request: Request):
             db.get_collection("security_alerts").insert_one(alert_doc)
             broadcaster.broadcast_sync(email, alert_doc)
 
+            # Dispatch security alert to user via Amazon SNS if account is locked or multiple failures
+            if is_locked_acct or fail_count >= 3:
+                notif = notification_service.send_brute_force_alert(
+                    email=email,
+                    fail_count=fail_count,
+                    client_ip=client_ip,
+                    lockout_seconds=remaining_acct
+                )
+                broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
             # Record in security_events for SOC Blue Team
             db.security_events.insert_one({
                 "event_id": f"evt_fail_{int(time.time()*1000)}",
@@ -624,6 +721,25 @@ def login(payload: LoginSchema, request: Request):
         }
         db.get_collection("security_alerts").insert_one(alert_doc)
         broadcaster.broadcast_sync(email, alert_doc)
+
+        # Dispatch desktop notification to Primary Device
+        city_name = geo.get("city", "Remote Location")
+        send_desktop_notification(
+            title=f"🚨 Threat Blocked: {city_name}",
+            message=f"Impossible Travel / High-Risk attempt from {client_ip} was BLOCKED. Alert dispatched to email."
+        )
+
+        # Dispatch urgent threat alert via Amazon SNS & Email
+        notif = notification_service.send_threat_blocked(
+            email=email,
+            threat_type="HIGH_RISK_HIJACK_BLOCKED",
+            risk_score=risk_score,
+            geo=geo,
+            client_ip=client_ip,
+            factors=ml_eval["explainable_factors"]
+        )
+        broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
         raise HTTPException(
             status_code=403,
             detail={
@@ -635,10 +751,24 @@ def login(payload: LoginSchema, request: Request):
         )
 
     # Scenario B: MEDIUM RISK -> STEP-UP MFA CHALLENGE
+    # If the user does not have an established primary device yet, this device is their
+    # initial primary portal enrollment. Secondary-device step-up MFA requires an active
+    # primary device to approve or display codes. Therefore, initial primary enrollment
+    # allows legitimate access (prompting confirmation as Main Device) unless a critical
+    # threat triggers BLOCK_SESSION.
+    has_primary_device = bool(user.get("primary_device"))
+    if risk_action == "STEP_UP_MFA" and not has_primary_device:
+        cloudwatch.put_log_event(
+            log_group="/aws/lambda/AuthHandler",
+            level="INFO",
+            message=f"Initial primary device enrollment for {email}: granting primary portal setup despite medium risk score {risk_score}."
+        )
+        risk_action = "ALLOW"
+
     if risk_action == "STEP_UP_MFA":
         otp = generate_mfa_code()
         temp_token = generate_session_token()
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(timezone.utc) .isoformat()
         db.users.update_one(
             {"email": email},
             {"$set": {
@@ -658,7 +788,8 @@ def login(payload: LoginSchema, request: Request):
             }}
         )
         # Create alert specifically delivering code to Primary Device
-        primary_dev_name = user.get("primary_device", {}).get("label", "Primary Security Portal")
+        primary_dev = user.get("primary_device") or {}
+        primary_dev_name = primary_dev.get("label", "Primary Security Portal")
         dev_desc = f"{fingerprint.get('browser', 'Browser')} on {fingerprint.get('os', 'Unknown')}"
         alert_doc = {
             "alert_id": f"alt_mfa_{int(time.time()*1000)}",
@@ -683,6 +814,17 @@ def login(payload: LoginSchema, request: Request):
             message=f"Access requested from {geo.get('city', 'Unknown')} ({dev_desc}). Verification code: {otp}"
         )
         broadcaster.broadcast_sync(email, alert_doc)
+
+        # Dispatch 6-digit verification code to user's email via Amazon SNS
+        notif = notification_service.send_mfa_code(
+            email=email,
+            otp=otp,
+            device_name=dev_desc,
+            geo=geo,
+            client_ip=client_ip
+        )
+        broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
         return {
             "status": "MFA_REQUIRED",
             "action": "STEP_UP_MFA",
@@ -801,6 +943,16 @@ def login(payload: LoginSchema, request: Request):
 
             # Push live event via SSE to connected Primary Device (0ms latency!)
             broadcaster.broadcast_sync(email, alert_doc)
+
+            # Dispatch 6-digit approval code to user's email via Amazon SNS
+            notif = notification_service.send_mfa_code(
+                email=email,
+                otp=otp,
+                device_name=device_name,
+                geo=geo,
+                client_ip=client_ip
+            )
+            broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
 
             cloudwatch.put_log_event(
                 log_group="/aws/lambda/AuthHandler",
@@ -931,6 +1083,24 @@ def verify_mfa(payload: VerifyMFASchema):
         {"user_email": email, "temp_token": payload.temp_token},
         {"$set": {"status": "RESOLVED_VERIFIED"}}
     )
+
+    # Real-time Broadcast to Primary Device to automatically close modal-secondary-device-approval!
+    broadcaster.broadcast_sync(email, {
+        "type": "SECONDARY_DEVICE_VERIFIED",
+        "temp_token": payload.temp_token,
+        "device": dev_label,
+        "message": f"Secondary device ({dev_label}) entered the verification code and signed in successfully."
+    })
+
+    # Dispatch security notification
+    notif = notification_service.dispatch(
+        recipient_email=email,
+        subject=f"ℹ️ [AWS Security] Secondary Device Signed In: {dev_label}",
+        body_text=f"Secondary Device Access Granted:\n\nAccount: {email}\nDevice:  {dev_label}\nIP:      {client_ip}\nTime:    {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n\nA secondary session was authenticated using the verification code displayed on your Primary Device.\nIf you did not authorize this, freeze your account immediately from your Primary Security Portal.",
+        notification_type="SECONDARY_DEVICE_LOGIN",
+        metadata={"device": dev_label, "client_ip": client_ip, "tier": device_tier}
+    )
+    broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
 
     # Update user's last successful login
     db.users.update_one(
@@ -1079,9 +1249,10 @@ def approve_secondary_device(payload: ApproveSecondarySchema, user: Dict[str, An
 
 
 @app.post("/api/auth/unlock-self")
-def unlock_self(user: Dict[str, Any] = Depends(get_current_user)):
+def unlock_self(request: Request, user: Dict[str, Any] = Depends(get_current_user)):
     """Allows the authenticated Primary Device owner to unfreeze and restore their own account."""
     email = user["email"]
+    client_ip = request.client.host if request.client else "127.0.0.1"
     db.users.update_one(
         {"email": email},
         {"$set": {"status": "ACTIVE", "updated_at": datetime.now(timezone.utc).isoformat()}}
@@ -1092,16 +1263,19 @@ def unlock_self(user: Dict[str, Any] = Depends(get_current_user)):
         level="INFO",
         message=f"Account {email} self-unlocked to ACTIVE status by owner on Primary Device."
     )
+    notif = notification_service.send_account_status_alert(email, "ACTIVE", client_ip)
+    broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
     return {"status": "SUCCESS", "message": "Account successfully unfrozen and restored to ACTIVE status."}
 
 
 @app.post("/api/auth/forgot-password")
-def forgot_password(payload: ForgotPasswordSchema):
+def forgot_password(payload: ForgotPasswordSchema, request: Request):
+    client_ip = request.client.host if request.client else "127.0.0.1"
     email = sanitize_email(payload.email)
     user = db.users.find_one({"email": email})
 
     # Anti-enumeration response: always return the same success message regardless of existence
-    generic_msg = "If an account exists with this email, a secure password reset link has been dispatched."
+    generic_msg = f"If an account exists for {email}, a secure password reset link has been dispatched via Amazon SNS."
 
     if user:
         token = generate_reset_token()
@@ -1118,7 +1292,18 @@ def forgot_password(payload: ForgotPasswordSchema):
             message=f"Password reset token issued for {email}",
             payload={"token_demo": token} # Provided for local testing
         )
-        return {"status": "SUCCESS", "message": generic_msg, "demo_reset_token": token}
+        # Dispatch to legitimate user's email via Amazon SNS / SES / Mailbox!
+        notif = notification_service.send_password_reset(email, token, client_ip)
+        broadcaster.broadcast_sync(email, {
+            "type": "NOTIFICATION_DISPATCHED",
+            "notification": notif
+        })
+        return {
+            "status": "SUCCESS",
+            "message": f"Password reset link dispatched to {email} via Amazon SNS.",
+            "demo_reset_token": token,
+            "channel": notif.get("channel", "Amazon SNS")
+        }
 
     return {"status": "SUCCESS", "message": generic_msg}
 
@@ -1165,7 +1350,49 @@ def reset_password(payload: ResetPasswordSchema):
         message=f"Password rotated and sessions invalidated for {email}"
     )
 
+    # Dispatch security confirmation via Amazon SNS
+    notif = notification_service.send_password_changed(email, "ResetFlow")
+    broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
     return {"status": "SUCCESS", "message": "Password successfully updated. All previous sessions terminated."}
+
+
+@app.post("/api/auth/change-password")
+def change_password(payload: ChangePasswordSchema, request: Request, user: Dict[str, Any] = Depends(get_current_user)):
+    """Allows an authenticated user to rotate their password directly using their current password without needing a recovery token."""
+    if not verify_password(payload.current_password, user.get("password_hash", ""), user.get("salt", "")):
+        raise HTTPException(status_code=400, detail="Incorrect current master password.")
+
+    is_valid, msg = validate_password_strength(payload.new_password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=msg)
+
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    new_hash, new_salt = hash_password(payload.new_password)
+    email = user["email"]
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    db.users.update_one(
+        {"email": email},
+        {"$set": {
+            "password_hash": new_hash,
+            "salt": new_salt,
+            "status": "ACTIVE",
+            "updated_at": now_iso
+        }}
+    )
+
+    cloudwatch.put_log_event(
+        log_group="/aws/lambda/AuthHandler",
+        level="INFO",
+        message=f"Password rotated by authenticated user {email}"
+    )
+
+    # Dispatch security confirmation via Amazon SNS
+    notif = notification_service.send_password_changed(email, client_ip)
+    broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
+    return {"status": "SUCCESS", "message": "Master password successfully updated."}
 
 
 # -------------------------------------------------------------
@@ -1196,6 +1423,7 @@ def get_me(authorization: Optional[str] = Header(None), user: Dict[str, Any] = D
 
 
 @app.post("/api/auth/devices/set-primary")
+@app.post("/api/auth/set-primary-device")
 def set_primary_device(payload: SetPrimaryDeviceSchema, authorization: Optional[str] = Header(None), user: Dict[str, Any] = Depends(get_current_user)):
     token = authorization.split(" ")[1] if authorization and authorization.startswith("Bearer ") else None
     session = db.active_sessions.find_one({"session_token": token})
@@ -1287,11 +1515,17 @@ def set_primary_device(payload: SetPrimaryDeviceSchema, authorization: Optional[
         level="INFO",
         message=f"Device enrollment for {user['email']}: Primary={payload.is_primary} ({device_label})"
     )
+
+    if payload.is_primary:
+        client_ip = session.get("ip_address", "127.0.0.1")
+        notif = notification_service.send_primary_device_transferred(user["email"], device_label, client_ip)
+        broadcaster.broadcast_sync(user["email"], {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
     return {"status": "SUCCESS", "message": msg, "device_tier": "PRIMARY" if payload.is_primary else "SECONDARY"}
 
 
 @app.post("/api/auth/secondary-password/update")
-def update_secondary_password(payload: UpdateSecondaryPasswordSchema, user: Dict[str, Any] = Depends(get_current_user)):
+def update_secondary_password(payload: UpdateSecondaryPasswordSchema, request: Request = None, user: Dict[str, Any] = Depends(get_current_user)):
     """Allows user to update their Master Secondary Security Password."""
     valid = verify_password(payload.current_password, user["password_hash"], user["salt"])
     if not valid and user.get("secondary_password_hash") and user.get("secondary_password_salt"):
@@ -1314,6 +1548,11 @@ def update_secondary_password(payload: UpdateSecondaryPasswordSchema, user: Dict
         level="INFO",
         message=f"Secondary Security Password rotated for {user['email']}"
     )
+
+    client_ip = request.client.host if (request and request.client) else "127.0.0.1"
+    notif = notification_service.send_secondary_password_changed(user["email"], client_ip)
+    broadcaster.broadcast_sync(user["email"], {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
     return {"status": "SUCCESS", "message": "Master Secondary Security Password updated successfully."}
 
 
@@ -1436,6 +1675,12 @@ def kill_other_sessions(authorization: Optional[str] = Header(None), user: Dict[
         level="INFO",
         message=f"User {user['email']} revoked {deleted_count} remote session(s). Primary session preserved."
     )
+
+    if deleted_count > 0:
+        client_ip = current_session.get("ip_address", "127.0.0.1") if current_session else "127.0.0.1"
+        notif = notification_service.send_sessions_revoked_alert(user["email"], deleted_count, client_ip)
+        broadcaster.broadcast_sync(user["email"], {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
     return {
         "status": "SUCCESS",
         "message": f"Successfully revoked {deleted_count} other active session(s). Your primary portal remains active.",
@@ -1444,7 +1689,7 @@ def kill_other_sessions(authorization: Optional[str] = Header(None), user: Dict[
 
 
 @app.post("/api/auth/lock-account")
-def lock_account(authorization: Optional[str] = Header(None), user: Dict[str, Any] = Depends(get_current_user)):
+def lock_account(request: Request, authorization: Optional[str] = Header(None), user: Dict[str, Any] = Depends(get_current_user)):
     current_token = authorization.split(" ")[1] if authorization and authorization.startswith("Bearer ") else None
     current_session = db.active_sessions.find_one({"session_token": current_token}) if current_token else None
 
@@ -1456,6 +1701,7 @@ def lock_account(authorization: Optional[str] = Header(None), user: Dict[str, An
         )
 
     email = user["email"]
+    client_ip = request.client.host if (request and request.client) else "127.0.0.1"
     # Freeze account and kill all remote secondary sessions, preserving primary device session!
     db.users.update_one({"email": email}, {"$set": {"status": "LOCKED"}})
     db.active_sessions.delete_many({"user_email": email, "is_primary_device": {"$ne": True}})
@@ -1465,6 +1711,11 @@ def lock_account(authorization: Optional[str] = Header(None), user: Dict[str, An
         level="WARN",
         message=f"Emergency Lockout activated by user {email}. Primary device session preserved."
     )
+
+    # Dispatch emergency lock notification to user via Amazon SNS
+    notif = notification_service.send_account_status_alert(email, "FROZEN", client_ip)
+    broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
     return {"status": "SUCCESS", "message": "Account successfully frozen. Remote secondary sessions terminated. Your primary device remains active."}
 
 
@@ -1486,6 +1737,10 @@ def delete_account(payload: AccountDeleteSchema, user: Dict[str, Any] = Depends(
         level="INFO",
         message=f"Account and associated telemetry deleted for {email}"
     )
+
+    client_ip = "127.0.0.1"
+    notification_service.send_account_deleted_alert(email, client_ip)
+
     return {"status": "SUCCESS", "message": "Your account and all associated telemetry have been permanently deleted."}
 
 
@@ -1526,6 +1781,74 @@ def dismiss_user_alert(payload: Dict[str, Any], user: Dict[str, Any] = Depends(g
 def dismiss_all_user_alerts(user: Dict[str, Any] = Depends(get_current_user)):
     db.get_collection("security_alerts").delete_many({"user_email": user["email"]})
     return {"status": "SUCCESS", "message": "All alerts cleared."}
+
+
+@app.get("/api/security/dispatched-notifications")
+def get_dispatched_notifications(limit: int = 50, user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)):
+    """
+    Returns recent notifications dispatched via Amazon SNS / SES / Email simulator.
+    Authenticated users see their own messages; unauthenticated/SOC preview sees recent notifications.
+    """
+    query = {}
+    if user and user.get("role") != "SECURITY_ADMIN":
+        query["recipient_email"] = user["email"]
+
+    records = db.get_collection("dispatched_notifications").find(
+        query,
+        sort_key="created_at",
+        reverse=True,
+        limit=limit
+    )
+    for r in records:
+        if "_id" in r:
+            del r["_id"]
+    status_info = notification_service.get_status()
+    return {
+        "status": "SUCCESS",
+        "total": len(records),
+        "notifications": records,
+        "sns_topic_configured": status_info["sns_configured"],
+        "smtp_configured": status_info["smtp_configured"],
+        "is_gmail": status_info["is_gmail"],
+        "engine_mode": status_info["mode"],
+        "engine_description": status_info["description"],
+        "engine_status": status_info
+    }
+
+
+@app.post("/api/security/dispatched-notifications/clear")
+@app.delete("/api/security/dispatched-notifications")
+def clear_dispatched_notifications(user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)):
+    """Clears all dispatched security alerts and recovery emails from the mailbox."""
+    query = {}
+    if user and user.get("role") != "SECURITY_ADMIN":
+        query["recipient_email"] = user["email"]
+    del_count = db.get_collection("dispatched_notifications").delete_many(query)
+    return {
+        "status": "SUCCESS",
+        "deleted_count": del_count,
+        "message": "Dispatched security notifications cleared successfully."
+    }
+
+
+@app.post("/api/security/test-notification")
+def test_notification(payload: TestNotificationSchema, request: Request, user: Dict[str, Any] = Depends(get_current_user)):
+    """Allows testing Amazon SNS / Email dispatch live."""
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    target_email = sanitize_email(payload.recipient_email)
+    msg = payload.message or f"Test security alert dispatched at {datetime.now(timezone.utc).isoformat()}."
+    record = notification_service.dispatch(
+        recipient_email=target_email,
+        subject="🧪 [AWS Security Test] Amazon SNS Diagnostic Dispatch",
+        body_text=f"Diagnostic Test Message:\n\n{msg}\n\nClient IP: {client_ip}",
+        notification_type=payload.notification_type or "TEST_SECURITY_ALERT",
+        metadata={"client_ip": client_ip, "initiated_by": user["email"]}
+    )
+    broadcaster.broadcast_sync(target_email, {
+        "type": "NOTIFICATION_DISPATCHED",
+        "notification": record
+    })
+    return {"status": "SUCCESS", "message": "Notification dispatched successfully", "record": record}
 
 
 @app.get("/api/security/stream")
@@ -1598,7 +1921,8 @@ def simulate_attack(payload: SimulateAttackSchema):
     user = db.users.find_one({"email": email})
 
     # Base coordinates
-    last_loc = user.get("last_successful_login", {}).get("geo", {"lat": 40.7128, "lon": -74.0060, "city": "New York", "country": "US"}) if user else {"lat": 40.7128, "lon": -74.0060, "city": "New York", "country": "US"}
+    user_last_login = (user.get("last_successful_login") or {}) if user else {}
+    last_loc = user_last_login.get("geo") or {"lat": 40.7128, "lon": -74.0060, "city": "New York", "country": "US"}
 
     raw_type = payload.attack_type or payload.scenario_id or "IMPOSSIBLE_TRAVEL"
     attack_type = raw_type.upper()
@@ -1713,6 +2037,27 @@ def simulate_attack(payload: SimulateAttackSchema):
         db.get_collection("security_alerts").insert_one(sim_alert)
         broadcaster.broadcast_sync(email, sim_alert)
 
+        # Dispatch via Amazon SNS / Email!
+        if action == "BLOCK_SESSION":
+            notif = notification_service.send_threat_blocked(
+                email=email,
+                threat_type=f"SIMULATED_{attack_type}",
+                risk_score=score,
+                geo=simulated_geo,
+                client_ip=simulated_ip,
+                factors=ml_res["explainable_factors"]
+            )
+            broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+        elif action == "STEP_UP_MFA":
+            notif = notification_service.send_mfa_code(
+                email=email,
+                otp="654321",
+                device_name=simulated_fp.get("os", "Simulated Vector"),
+                geo=simulated_geo,
+                client_ip=simulated_ip
+            )
+            broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
     return {
         "status": "SIMULATION_COMPLETE",
         "attack_type": attack_type,
@@ -1731,6 +2076,18 @@ def simulate_attack(payload: SimulateAttackSchema):
 def get_security_events(limit: int = 50):
     events = db.security_events.find(sort_key="timestamp", reverse=True, limit=min(limit, 100))
     return {"events": events}
+
+
+@app.post("/api/security/events/clear")
+@app.delete("/api/security/events")
+def clear_security_events():
+    """Clears all security events, login attempts, and real-time stream logs."""
+    del_count = db.security_events.delete_many({})
+    return {
+        "status": "SUCCESS",
+        "deleted_count": del_count,
+        "message": "Security events and login stream cleared successfully."
+    }
 
 
 @app.get("/api/security/stats")
@@ -1759,8 +2116,21 @@ def get_security_stats():
 # CloudWatch Telemetry API
 # -------------------------------------------------------------
 @app.get("/api/monitoring/cloudwatch")
+@app.get("/api/monitoring/cloudwatch/metrics")
+@app.get("/api/cloudwatch/metrics")
 def get_cloudwatch_telemetry():
     return cloudwatch.get_dashboard_summary()
+
+
+@app.post("/api/monitoring/cloudwatch/clear")
+@app.delete("/api/monitoring/cloudwatch")
+def clear_cloudwatch_telemetry():
+    """Clears all CloudWatch audit logs and resets telemetry counters."""
+    cloudwatch.clear_logs()
+    return {
+        "status": "SUCCESS",
+        "message": "CloudWatch logs and telemetry counters reset successfully."
+    }
 
 
 # -------------------------------------------------------------

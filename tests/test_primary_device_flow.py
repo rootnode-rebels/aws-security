@@ -166,5 +166,90 @@ def test_primary_device_full_flow():
     print("\n[SUCCESS] PRIMARY VS SECONDARY DEVICE WORKFLOW VERIFIED 100% WORKING!")
     print("=======================================================\n")
 
+
+def test_secondary_device_verify_mfa_resolves_approval_alert():
+    """Verify entering the verification code on the secondary device marks the approval alert resolved."""
+    test_email = "test_mfa_popup_dismiss@awssecurity.io"
+    test_pwd = "MfaPopupPassword#2026"
+
+    # Cleanup
+    db.users.delete_one({"email": test_email})
+    db.active_sessions.delete_many({"user_email": test_email})
+    db.get_collection("security_alerts").delete_many({"user_email": test_email})
+    rate_limiter.clear_all()
+
+    # Register
+    reg = client.post("/api/auth/register", json={
+        "email": test_email,
+        "full_name": "Popup Dismiss Tester",
+        "password": test_pwd,
+        "fingerprint": {"browser": "Chrome", "browser_id": "b1_primary_fp", "os": "Windows NT 10.0"}
+    })
+    assert reg.status_code == 201
+
+    # Login Primary Device
+    login1 = client.post("/api/auth/login", json={
+        "email": test_email,
+        "password": test_pwd,
+        "fingerprint": {"browser": "Chrome", "browser_id": "b1_primary_fp", "os": "Windows NT 10.0"}
+    })
+    assert login1.status_code == 200
+    token1 = login1.json()["token"]
+    headers1 = {"Authorization": f"Bearer {token1}"}
+
+    # Set as Primary Device
+    set_prim = client.post("/api/auth/devices/set-primary", headers=headers1, json={
+        "is_primary": True,
+        "device_label": "Primary Security Portal (Desktop)",
+        "secondary_password": "MasterKey#2026"
+    })
+    assert set_prim.status_code == 200
+
+    # Secondary Device signs in -> triggers MFA_REQUIRED
+    login2 = client.post("/api/auth/login", json={
+        "email": test_email,
+        "password": test_pwd,
+        "fingerprint": {"browser": "Firefox", "browser_id": "b2_secondary_fp", "os": "Linux"}
+    })
+    assert login2.status_code == 200
+    data2 = login2.json()
+    assert data2["status"] == "MFA_REQUIRED"
+    temp_token = data2["temp_token"]
+
+    # Primary Device gets the approval request alert containing the 6-digit code
+    alerts1 = client.get("/api/security/user-alerts", headers=headers1).json()["alerts"]
+    sec_alert = next((a for a in alerts1 if a.get("temp_token") == temp_token and a.get("type") == "SECONDARY_DEVICE_APPROVAL_REQUEST"), None)
+    assert sec_alert is not None
+    assert sec_alert["status"] == "PENDING_APPROVAL"
+    code = sec_alert["verification_code"]
+    assert len(code) == 6
+
+    # Secondary Device enters code into /api/auth/verify-mfa
+    verify_res = client.post("/api/auth/verify-mfa", json={
+        "email": test_email,
+        "temp_token": temp_token,
+        "mfa_code": code
+    })
+    assert verify_res.status_code == 200
+    assert verify_res.json()["status"] == "SUCCESS"
+    token2 = verify_res.json()["token"]
+
+    # Verify that the alert is now marked RESOLVED_VERIFIED in the DB
+    updated_alerts = client.get("/api/security/user-alerts", headers=headers1).json()["alerts"]
+    resolved_alert = next((a for a in updated_alerts if a.get("temp_token") == temp_token), None)
+    assert resolved_alert is not None
+    assert resolved_alert["status"] == "RESOLVED_VERIFIED"
+
+    # Verify there are NO pending approval alerts left
+    pending_alerts = [a for a in updated_alerts if a.get("type") == "SECONDARY_DEVICE_APPROVAL_REQUEST" and a.get("status") == "PENDING_APPROVAL"]
+    assert len(pending_alerts) == 0
+
+    # Cleanup
+    db.users.delete_one({"email": test_email})
+    db.active_sessions.delete_many({"user_email": test_email})
+    db.get_collection("security_alerts").delete_many({"user_email": test_email})
+
+
 if __name__ == "__main__":
     test_primary_device_full_flow()
+    test_secondary_device_verify_mfa_resolves_approval_alert()

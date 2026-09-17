@@ -252,6 +252,96 @@ function closeModal(modalId) {
 }
 window.closeModal = closeModal;
 
+// Universal HTML Escaper for Security & Safe Rendering
+function escapeHtml(str) {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+window.escapeHtml = escapeHtml;
+
+// Global Controller for Amazon SNS & Dispatched Security Mailbox Modal
+async function openDispatchedMailbox() {
+  openModal("modal-dispatched-notifications");
+  if (typeof window.fetchDispatchedNotifications === "function") {
+    await window.fetchDispatchedNotifications();
+  }
+}
+window.openDispatchedMailbox = openDispatchedMailbox;
+
+// Central Password Modal Controller
+function switchPasswordMode(mode) {
+  const formAuth = document.getElementById("form-change-password-auth");
+  const formToken = document.getElementById("form-reset-password-token");
+  const btnAuth = document.getElementById("tab-pw-auth");
+  const btnToken = document.getElementById("tab-pw-token");
+
+  if (mode === "auth") {
+    if (formAuth) formAuth.style.display = "block";
+    if (formToken) formToken.style.display = "none";
+    if (btnAuth) btnAuth.classList.add("active");
+    if (btnToken) btnToken.classList.remove("active");
+  } else {
+    if (formAuth) formAuth.style.display = "none";
+    if (formToken) formToken.style.display = "block";
+    if (btnAuth) btnAuth.classList.remove("active");
+    if (btnToken) btnToken.classList.add("active");
+  }
+}
+window.switchPasswordMode = switchPasswordMode;
+
+function openPasswordModal(preferredMode) {
+  const isAuth = !!(AppState && AppState.user && AppState.token);
+  const mode = preferredMode || (isAuth ? "auth" : "token");
+  switchPasswordMode(mode);
+  openModal("modal-reset-password");
+}
+window.openPasswordModal = openPasswordModal;
+
+async function handleChangePasswordAuth(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const currentPassword = document.getElementById("change-curr-password")?.value || "";
+  const newPassword = document.getElementById("change-new-password")?.value || "";
+
+  if (!currentPassword) {
+    showToast("Please enter your current master password.", "warning");
+    return;
+  }
+  if (!newPassword || newPassword.length < 8) {
+    showToast("New password must be at least 8 characters with mixed cases & numbers.", "warning");
+    return;
+  }
+
+  if (!AppState.token) {
+    showToast("Please sign in or use the Single-Use Token tab.", "warning");
+    switchPasswordMode("token");
+    return;
+  }
+
+  showToast("Updating master credentials...", "info");
+  const res = await apiFetch("/api/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+  });
+
+  if (res.ok) {
+    closeModal("modal-reset-password");
+    const currInput = document.getElementById("change-curr-password");
+    const newInput = document.getElementById("change-new-password");
+    if (currInput) currInput.value = "";
+    if (newInput) newInput.value = "";
+    showToast("Master password successfully updated! Remote sessions revoked.", "success");
+  } else {
+    const errorMsg = res.data?.detail || res.error || "Failed to update password. Check your current password.";
+    showToast(errorMsg, "error");
+  }
+}
+window.handleChangePasswordAuth = handleChangePasswordAuth;
+
 // Global Escape Key Listener for Modals
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {

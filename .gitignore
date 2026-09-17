@@ -31,7 +31,9 @@ share/python-wheels/
 MANIFEST
 
 # Data & Logs
-data/
+data/*.json
+data/*.tmp*
+!data/.gitkeep
 *.log
 *.sqlite3
 *.db
