@@ -2759,3 +2759,249 @@ input:checked + .slider:before {
   transform: translateY(-2px);
 }
 
+
+/* ========================================================================
+   LIGHT MODE OVERRIDES
+   ======================================================================== */
+[data-theme="light"] {
+  --bg-space: #f8fafc;
+  --bg-deep: #e2e8f0;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-dim: #64748b;
+  --text-muted: #94a3b8;
+  --border-subtle: rgba(0, 0, 0, 0.1);
+  --glass-bg-regular: rgba(255, 255, 255, 0.7);
+  --glass-bg-elevated: rgba(255, 255, 255, 0.85);
+  --glass-bg-modal: rgba(255, 255, 255, 0.95);
+  --glass-bg-input: rgba(255, 255, 255, 0.9);
+  --glass-border-subtle: 1px solid rgba(0, 0, 0, 0.1);
+  --glass-border-specular: 1px solid rgba(0, 0, 0, 0.2);
+  --glass-shadow-floating: 0 10px 25px rgba(0, 0, 0, 0.05);
+}
+
+/* ========================================================================
+   CUSTOM SCROLLBAR
+   ======================================================================== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-deep, #0f172a);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle, rgba(255,255,255,0.1));
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim, #64748b);
+}
+
+/* ========================================================================
+   SKELETON LOADER
+   ======================================================================== */
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.05) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+  border-radius: 4px;
+  color: transparent !important;
+}
+[data-theme="light"] .skeleton {
+  background: linear-gradient(90deg, rgba(0,0,0,0.05) 25%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.05) 75%);
+  background-size: 200% 100%;
+}
+@keyframes skeleton-loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ========================================================================
+   BACK TO TOP BUTTON
+   ======================================================================== */
+#back-to-top {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  z-index: 9999;
+  display: none;
+  width: 45px;
+  height: 45px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(56, 189, 248, 0.4);
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  transition: all 0.3s ease;
+}
+#back-to-top:hover {
+  transform: translateY(-3px) scale(1.05);
+  box-shadow: 0 6px 16px rgba(56, 189, 248, 0.6);
+}
+
+/* ========================================================================
+   COOKIE BANNER
+   ======================================================================== */
+#cookie-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: var(--glass-bg-elevated);
+  backdrop-filter: var(--glass-blur-md);
+  border-top: var(--glass-border-subtle);
+  padding: 1rem 2rem;
+  z-index: 99999;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  transform: translateY(100%);
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+#cookie-banner.visible {
+  transform: translateY(0);
+}
+
+/* ========================================================================
+   PASSWORD VISIBILITY TOGGLE & COPY BUTTONS
+   ======================================================================== */
+.input-group-with-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.input-group-with-icon input {
+  padding-right: 40px;
+  width: 100%;
+}
+.input-icon-btn {
+  position: absolute;
+  right: 10px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  transition: color 0.2s ease;
+}
+.input-icon-btn:hover {
+  color: var(--text-primary);
+}
+
+/* ========================================================================
+   MOBILE HEADER & MENU
+   ======================================================================== */
+.mobile-header {
+  display: none;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background: var(--glass-bg-dock);
+  backdrop-filter: var(--glass-blur-md);
+  border-bottom: var(--glass-border-subtle);
+  padding: 10px 15px;
+  align-items: center;
+  justify-content: space-between;
+}
+.mobile-menu-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+@media (max-width: 900px) {
+  .mobile-header { display: flex; }
+  .sidebar { 
+    position: fixed; 
+    left: -100%; 
+    transition: left 0.3s cubic-bezier(0.16, 1, 0.3, 1); 
+    z-index: 1001;
+  }
+  .sidebar.mobile-open { left: 0; }
+  .dashboard-container { flex-direction: column; }
+  .main-content { margin-left: 0 !important; width: 100%; padding-top: 20px; }
+}
+
+/* ========================================================================
+   SKIP TO CONTENT
+   ======================================================================== */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: var(--accent-cyan);
+  color: #fff;
+  padding: 8px;
+  z-index: 100000;
+  transition: top 0.2s ease;
+}
+.skip-link:focus {
+  top: 0;
+}
+
+/* ========================================================================
+   EXPANDABLE FAQS
+   ======================================================================== */
+.faq-item {
+  border-bottom: var(--border-subtle);
+  padding: 1rem 0;
+}
+.faq-question {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.faq-answer {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin-top: 0;
+}
+.faq-item.open .faq-answer {
+  max-height: 500px;
+  margin-top: 0.8rem;
+}
+
+
+.copy-btn {
+  cursor: pointer;
+  opacity: 0.6;
+  transition: all 0.2s;
+  font-size: 0.9em;
+  margin-left: 6px;
+  filter: grayscale(100%);
+}
+.copy-btn:hover {
+  opacity: 1;
+  transform: scale(1.1);
+  filter: grayscale(0%);
+}
+
+.prominent-logout {
+  background-color: var(--danger-color, #dc2626) !important;
+  color: white !important;
+  font-weight: 700;
+  border-radius: var(--radius-md);
+  margin-top: 10px;
+}
+
+.prominent-logout:hover {
+  background-color: #b91c1c !important;
+  box-shadow: 0 0 10px rgba(220, 38, 38, 0.5);
+}

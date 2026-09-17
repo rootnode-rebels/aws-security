@@ -27,10 +27,10 @@ window.cmsLoadData = cmsLoadData;
  */
 async function cmsFetchStats() {
   try {
-    const response = await fetch('/api/cms/stats');
-    if (!response.ok) throw new Error('Failed to fetch stats');
+    const response = await apiFetch('/api/cms/stats');
+    if (!response.ok) throw new Error(response.data?.detail || 'Failed to fetch stats');
     
-    const data = await response.json();
+    const data = response.data;
     
     const uEl = document.getElementById('cms-metric-users');
     const sEl = document.getElementById('cms-metric-sessions');
@@ -61,16 +61,18 @@ async function cmsFetchStats() {
 async function cmsFetchUsers() {
   const tbody = document.getElementById('cms-users-tbody');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Loading users...</td></tr>';
+  if (typeof renderSkeletonRows === "function") renderSkeletonRows("cms-users-tbody", 5);
+  else tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Loading users...</td></tr>';
   
   try {
-    const response = await fetch('/api/cms/users');
-    if (!response.ok) throw new Error('Failed to fetch users');
+    const response = await apiFetch('/api/cms/users');
+    if (!response.ok) throw new Error(response.data?.detail || 'Failed to fetch users');
     
-    const users = await response.json();
+    const users = response.data;
     
     if (!Array.isArray(users) || users.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No users found.</td></tr>';
+      if (typeof renderEmptyState === "function") renderEmptyState("cms-users-tbody", "No users found.");
+      else tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No users found.</td></tr>';
       return;
     }
     
@@ -99,7 +101,7 @@ async function cmsFetchUsers() {
             ${isRootAdmin ? '<span class="badge badge-low font-mono" style="font-size: 0.65rem; color: var(--accent-amber); border-color: rgba(245, 158, 11, 0.4);" title="Root Administrator">👑 Root Admin</span>' : ''}
           </div>
         </td>
-        <td><code class="font-mono text-cyan">${user.email}</code></td>
+        <td><code class="font-mono text-cyan">${user.email}</code>&nbsp;<span class="copy-btn" onclick="copyToClipboard('${user.email}')" title="Copy Email">??</span></td>
         <td>${statusBadge}</td>
         <td>${mfaEnabled}</td>
         <td style="font-size: 0.8rem; color: var(--text-muted);">${lastLogin}</td>
@@ -129,13 +131,12 @@ async function cmsFetchUsers() {
  */
 async function cmsUnlockUser(email) {
   try {
-    const response = await fetch(`/api/cms/users/${encodeURIComponent(email)}/unlock`, {
+    const response = await apiFetch(`/api/cms/users/${encodeURIComponent(email)}/unlock`, {
       method: 'POST'
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Failed to unlock user');
+      throw new Error(response.data?.detail || 'Failed to unlock user');
     }
 
     if (typeof showToast === 'function') {
@@ -163,13 +164,12 @@ async function cmsDeleteUser(email) {
   }
   
   try {
-    const response = await fetch(`/api/cms/users/${encodeURIComponent(email)}`, {
+    const response = await apiFetch(`/api/cms/users/${encodeURIComponent(email)}`, {
       method: 'DELETE'
     });
     
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || 'Failed to delete user');
+      throw new Error(response.data?.detail || 'Failed to delete user');
     }
     
     if (typeof showToast === 'function') {
@@ -204,11 +204,11 @@ async function cmsToggleMaintenance(forceEnable = null) {
   }
   
   try {
-    const response = await fetch(`/api/system/maintenance?enable=${isEnabling}`, {
+    const response = await apiFetch(`/api/system/maintenance?enable=${isEnabling}`, {
       method: 'POST'
     });
     
-    if (!response.ok) throw new Error('Failed to toggle maintenance mode');
+    if (!response.ok) throw new Error(response.data?.detail || 'Failed to toggle maintenance mode');
     
     if (typeof applyMaintenanceState === 'function') {
       applyMaintenanceState(isEnabling);
@@ -243,4 +243,5 @@ async function cmsToggleMaintenance(forceEnable = null) {
   }
 }
 window.cmsToggleMaintenance = cmsToggleMaintenance;
+
 

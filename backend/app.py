@@ -10,6 +10,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 import asyncio
 import json
+import random
+import secrets
 
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -98,21 +100,20 @@ def seed_demo_user_if_needed(force: bool = False):
     # Add migration logic to downgrade mistakenly elevated users
     try:
         db.users.update_many(
-            {"email": {"$nin": ["demo@awssecurity.io", "demo@aegisguard.io", "likhithadm88@gmail.com"]}},
+            {"email": {"$nin": ["demo@awssecurity.io", "demo@aegisguard.io"]}},
             {"$set": {"role": "USER", "is_root_admin": False, "is_super_admin": False}}
         )
     except Exception as e:
         pass
 
     accounts = [
-        ("demo@awssecurity.io", "AWSSecurity#2026", "Sachin (Demo Security Lead)", "ROOT_ADMIN"),
-        ("demo@aegisguard.io", "AegisGuard#2026", "Sachin (Legacy Demo Account)", "ROOT_ADMIN"),
-        ("likhithadm88@gmail.com", "LikithaDM@2005", "Super Admin", "SUPER_ADMIN")
+        ("demo@awssecurity.io", os.getenv("DEMO_PWD_1", secrets.token_urlsafe(16)), "Sachin (Demo Security Lead)", "ROOT_ADMIN"),
+        ("demo@aegisguard.io", os.getenv("DEMO_PWD_2", secrets.token_urlsafe(16)), "Sachin (Legacy Demo Account)", "ROOT_ADMIN")
     ]
     for email, pwd, name, role in accounts:
         try:
             existing = db.users.find_one({"email": email})
-            sec_hash, sec_salt = hash_password("MasterKey#2026")
+            sec_hash, sec_salt = hash_password(os.getenv("DEFAULT_SEC_PWD", secrets.token_urlsafe(16)))
             is_super_admin = (role == "SUPER_ADMIN")
             if not existing:
                 pw_hash, salt = hash_password(pwd)
@@ -375,7 +376,7 @@ def register(payload: RegisterSchema, request: Request):
     pw_hash, salt = hash_password(payload.password)
 
     # Secondary security password for device promotion & transfer
-    sec_pwd = payload.secondary_password or "MasterKey#2026"
+    sec_pwd = payload.secondary_password or secrets.token_urlsafe(16)
     sec_hash, sec_salt = hash_password(sec_pwd)
 
     client_ip = request.client.host if request.client else "127.0.0.1"
@@ -404,7 +405,8 @@ def register(payload: RegisterSchema, request: Request):
         "secondary_password_salt": sec_salt,
         "primary_device": None, # Prompts user on first login: "Keep this device as main device?"
         "has_confirmed_primary": False,
-        "status": "ACTIVE",
+        "status": "UNVERIFIED",
+        "email_verification_code": str(random.randint(100000, 999999)),
         "role": "USER",
         "is_root_admin": False,
         "is_super_admin": False,
@@ -426,31 +428,62 @@ def register(payload: RegisterSchema, request: Request):
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
         level="INFO",
-        message=f"User registered: {clean_email}",
+        message=f"User registered (UNVERIFIED): {clean_email}",
         payload={"ip": client_ip, "city": geo_loc.get("city")}
     )
 
-    # Dispatch welcome & security enrollment notice via Amazon SNS
-    notif = notification_service.send_welcome_registration(clean_email, clean_name, client_ip)
+    # Dispatch email verification code via Amazon SNS
+    notif = notification_service.send_email_verification(clean_email, clean_name, user_doc["email_verification_code"])
     broadcaster.broadcast_sync(clean_email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
 
     return {
         "status": "success",
-        "message": "User account successfully created. Please sign in.",
-        "role": "USER",
-        "is_root_admin": False
+        "message": "Account created. Please check your email for the verification code.",
+        "requires_verification": True,
+        "email": clean_email
     }
+
+
+class VerifyEmailSchema(BaseModel):
+    email: str
+    code: str
+
+@app.post("/api/auth/verify-email", status_code=200)
+def verify_email(payload: VerifyEmailSchema):
+    clean_email = sanitize_email(payload.email)
+    user = db.users.find_one({"email": clean_email})
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid verification request.")
+    
+    if user.get("status") == "ACTIVE":
+        return {"status": "success", "message": "Email is already verified."}
+        
+    if str(user.get("email_verification_code")) != str(payload.code).strip():
+        raise HTTPException(status_code=400, detail="Invalid verification code.")
+        
+    # Mark as active
+    db.users.update_one(
+        {"email": clean_email},
+        {"$set": {"status": "ACTIVE", "email_verification_code": None}}
+    )
+    
+    # Send welcome email now that they are verified
+    notif = notification_service.send_welcome_registration(clean_email, user.get("full_name", "User"), "Verified")
+    broadcaster.broadcast_sync(clean_email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+    
+    return {"status": "success", "message": "Email verified successfully! You can now log in."}
+
 
 
 def resolve_client_ip(request: Request, spoofed_ip: Optional[str] = None) -> str:
     """Extracts client IP, respecting reverse proxies (ALB/CloudFront) and simulation overrides."""
     if spoofed_ip:
         return spoofed_ip
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        client_ip = xff.split(",")[0].strip()
-        if client_ip:
-            return client_ip
+    # xff = request.headers.get("x-forwarded-for")
+    # if xff:
+    #     client_ip = xff.split(",")[0].strip()
+    #     if client_ip:
+    #         return client_ip
     if request.client and request.client.host:
         return request.client.host
     return "127.0.0.1"
@@ -2200,8 +2233,8 @@ def cms_get_users(user: Dict[str, Any] = Depends(check_super_admin)):
         u.pop("salt", None)
         u.pop("mfa_secret", None)
         u.pop("mfa_pending", None)
-        u["role"] = u.get("role", "ROOT_ADMIN")
-        u["is_root_admin"] = u.get("is_root_admin", True)
+        u["role"] = u.get("role", "USER")
+        u["is_root_admin"] = u.get("is_root_admin", False)
         u["mfa_enabled"] = u.get("mfa_enabled", True)
         safe_users.append(u)
     return safe_users

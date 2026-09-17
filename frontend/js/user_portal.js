@@ -318,15 +318,20 @@ async function handleRegister(e) {
   });
 
   if (res.ok) {
-    showToast("Account created as Root Admin! 👑 Please sign in.", "success");
-    // Switch to login tab
-    switchAuthTab("login");
-    const loginEmail = document.getElementById("login-email");
-    if (loginEmail) loginEmail.value = email;
-    const loginPass = document.getElementById("login-password");
-    if (loginPass) {
-      loginPass.value = password;
-      loginPass.focus();
+    if (res.data.requires_verification) {
+      showToast(res.data.message, "info");
+      document.getElementById("verify-email-hidden").value = res.data.email;
+      openModal("modal-email-verification");
+    } else {
+      showToast("Account created successfully! Please sign in.", "success");
+      switchAuthTab("login");
+      const loginEmail = document.getElementById("login-email");
+      if (loginEmail) loginEmail.value = email;
+      const loginPass = document.getElementById("login-password");
+      if (loginPass) {
+        loginPass.value = password;
+        loginPass.focus();
+      }
     }
   } else {
     let errorMsg = "Registration failed. Check inputs.";
@@ -860,7 +865,7 @@ async function loadUserSessions(force = false) {
               <div class="session-device-cell">
                 <span class="material-symbols-outlined session-icon ${isPrimarySession ? 'text-emerald' : 'text-amber'}">${devIcon}</span>
                 <div>
-                  <div class="session-device-name">${s.device || 'Web Browser'}</div>
+                  <div class="session-device-name">${s.device || 'Web Browser'}&nbsp;<span class="copy-btn" onclick="copyToClipboard('${s.session_id}')" title="Copy Session ID">??</span></div>
                   <div class="session-device-badge-wrap">${deviceBadge}</div>
                 </div>
               </div>
@@ -1852,3 +1857,6 @@ async function clearDispatchedNotifications() {
   }
 }
 window.clearDispatchedNotifications = clearDispatchedNotifications;
+
+
+

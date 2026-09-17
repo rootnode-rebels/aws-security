@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <meta property="og:title" content="AWS Security Research Console">
+  <meta property="og:description" content="Defensive Machine Learning and Architecture Validation Console">
+  <meta property="og:image" content="https://raw.githubusercontent.com/rootnode-rebels/aws-security/main/docs/assets/preview.png">
+  <meta property="og:type" content="website">
   <title>AWSSecurity | Real-Time Account Hijacking Detection & Prevention</title>
   <meta name="description" content="Cloud-native AWS serverless and Machine Learning cybersecurity platform detecting and preventing account hijacking in real time.">
   
@@ -14,7 +18,15 @@
   
   <link rel="stylesheet" href="/static/css/style.css?v=4.2.0-auth-hidden">
 </head>
-<body>
+<body class="theme-dark">
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+  <div class="dashboard-container">
+    
+    <!-- Mobile Header -->
+    <div class="mobile-header">
+      <div style="font-weight: 700; color: #fff;">AWS Security</div>
+      <button class="mobile-menu-btn" onclick="toggleMobileMenu()">☰</button>
+    </div>
   <!-- Dynamic Liquid Glass Background Canvas (Unblocked Layer 0) -->
   <canvas id="cyber-bg" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none;"></canvas>
 
@@ -74,6 +86,16 @@
         <li>
           <button class="nav-btn" data-tab="cms-dashboard" id="nav-cms-dashboard" aria-controls="cms-dashboard" title="CMS Admin Console">
             <span class="nav-icon">⚙️</span><span class="nav-label">Admin</span>
+          </button>
+        </li>
+        <li style="margin-top: auto; padding-top: 15px; border-top: var(--glass-border-subtle);">
+          <button class="nav-btn" onclick="toggleTheme()" title="Toggle Light/Dark Mode">
+            <span class="nav-icon">🌓</span><span class="nav-label">Toggle Theme</span>
+          </button>
+        </li>
+        <li>
+          <button class="nav-btn logout-btn prominent-logout" id="btn-prominent-logout" onclick="handleLogout()" title="End session and securely logout">
+            <span class="nav-icon">🚪</span><span class="nav-label">Logout</span>
           </button>
         </li>
       </ul>
@@ -144,7 +166,7 @@
   </aside>
 
   <!-- Main Content Container -->
-  <main id="main-content" class="main-wrapper" role="main">
+  <main id="main-content" class="main-content" role="main">
 
     <!-- ============================================================= -->
     <!-- VIEW 1: LEGITIMATE USER PORTAL (PRIMARY & ACTIVE SESSIONS)    -->
@@ -347,7 +369,7 @@
                 <span class="material-symbols-outlined" style="font-size: 1rem;">lock_reset</span>
                 <span>Sign Out Everywhere</span>
               </button>
-              <button id="btn-prominent-logout" class="btn btn-primary btn-sm prominent-logout" onclick="handleLogout()" title="Securely Sign Out">
+              <button class="btn btn-danger btn-sm" onclick="handleLogout()" title="Sign Out">
                 <span class="material-symbols-outlined" style="font-size: 1rem;">logout</span>
                 <span>Sign Out</span>
               </button>
@@ -1252,7 +1274,18 @@
       </div>
     </section>
 
+    <!-- VIEW 7: 404 NOT FOUND -->
+    <section id="view-404" class="tab-view" aria-labelledby="notfound-heading">
+      <div style="text-align: center; margin-top: 10vh;">
+        <h1 id="notfound-heading" style="font-size: 4rem; color: var(--accent-crimson); margin-bottom: 10px;">404</h1>
+        <h2 style="color: #fff; margin-bottom: 20px;">Page Not Found</h2>
+        <p style="color: var(--text-muted); max-width: 400px; margin: 0 auto 30px;">The resource you are looking for does not exist or you do not have permission to access it.</p>
+        <button class="btn btn-primary" onclick="switchTab('user-portal')">Return Home</button>
+      </div>
+    </section>
+
   </main>
+  </div>
 
   <!-- ============================================================= -->
   <!-- REUSABLE ACCESSIBLE MODALS & UX STATES                        -->
@@ -1919,6 +1952,36 @@
     </div>
   </div>
 
+  <!-- Modal: FAQ -->
+  <div id="modal-faq" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="faq-title">
+    <div class="cyber-modal" style="max-width: 600px;">
+      <h2 id="faq-title" style="color: #fff; margin-bottom: 1rem;">Frequently Asked Questions</h2>
+      
+      <div class="faq-item">
+        <div class="faq-question" onclick="this.parentElement.classList.toggle('open')">
+          What is AWS Security Research Console? <span>+</span>
+        </div>
+        <div class="faq-answer">It is a defensive Machine Learning platform simulating and detecting cyber attacks.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-question" onclick="this.parentElement.classList.toggle('open')">
+          How does the Machine Learning work? <span>+</span>
+        </div>
+        <div class="faq-answer">It uses Isolation Forests and Random Forests to classify anomalies like Impossible Travel and Credential Stuffing in real-time.</div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-question" onclick="this.parentElement.classList.toggle('open')">
+          What is Amazon SNS used for? <span>+</span>
+        </div>
+        <div class="faq-answer">We use Amazon SNS and SES to dispatch critical security alerts and 2FA recovery codes instantly to verified email addresses.</div>
+      </div>
+      
+      <div class="modal-actions" style="margin-top: 1.5rem; justify-content: flex-end;">
+        <button type="button" class="btn btn-primary" onclick="closeModal('modal-faq')">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal: Legal Document Viewer -->
   <div id="modal-legal-doc" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="legal-modal-title">
     <div class="cyber-modal-box" style="max-width: 650px; max-height: 80vh; overflow-y: auto;">
@@ -1941,13 +2004,28 @@
       <span class="footer-link" onclick="showLegalDoc('terms')">Terms of Service</span>
       <span class="footer-link" onclick="showLegalDoc('cookies')">Cookie Policy</span>
       <span class="footer-link" onclick="showLegalDoc('security')">Security Architecture</span>
+      <span class="footer-link" onclick="openModal('modal-faq')">FAQ</span>
       <span class="footer-link" onclick="showLegalDoc('accessibility')">Accessibility</span>
       <span class="footer-link" onclick="showLegalDoc('disclosure')">Responsible Disclosure</span>
     </div>
   </footer>
 
+  <!-- Back to Top Button -->
+  <button id="back-to-top" onclick="window.scrollTo({top: 0, behavior: 'smooth'})" aria-label="Scroll to top">↑</button>
+
+  <!-- Cookie Banner -->
+  <div id="cookie-banner">
+    <div style="flex: 1; font-size: 0.9rem; color: var(--text-secondary);">
+      <strong>Essential Storage Only:</strong> We use browser localStorage solely to maintain secure authentication tokens. No third-party tracking is utilized.
+    </div>
+    <div style="display: flex; gap: 10px;">
+      <button class="btn btn-secondary btn-sm" onclick="showLegalDoc('cookies')">Read Policy</button>
+      <button class="btn btn-primary btn-sm" onclick="acceptCookies()">Accept</button>
+    </div>
+  </div>
+
   <!-- Scripts: app.js loaded first so AppState, apiFetch, and openModal are available to all modules -->
-  <script src="/static/js/app.js?v=4.0.0-clean"></script>
+  <script src="js/app.js"></script>
   <script src="/static/js/bg_animation.js?v=4.0.0-clean"></script>
   <script src="/static/js/fingerprint.js?v=4.0.0-clean"></script>
   <script src="/static/js/legal_views.js?v=4.0.0-clean"></script>
@@ -1991,5 +2069,87 @@
     window.switchAuthTab = switchAuthTab;
     window.toggleAuthTab = switchAuthTab;
   </script>
+
+<!-- Production UX State Overlays -->
+<div id="ux-toast-container" style="position:fixed;bottom:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:10px;"></div>
+<div id="ux-error-overlay" class="modal" style="display:none;">
+    <div class="modal-content text-center" style="max-width:500px;">
+        <h2 id="ux-error-title">Error</h2>
+        <p id="ux-error-desc">An unexpected error occurred.</p>
+        <button class="btn btn-primary" onclick="document.getElementById('ux-error-overlay').style.display='none'">Dismiss</button>
+    </div>
+</div>
+<button id="btn-back-to-top" class="btn btn-secondary" style="position:fixed;bottom:20px;left:20px;z-index:999;display:none;" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑ Top</button>
+
+
+<!-- Legal Modals -->
+<div id="modal-privacy" class="modal" style="display:none;z-index:10000;">
+    <div class="modal-content" style="max-width:800px;text-align:left;overflow-y:auto;max-height:80vh;">
+        <div class="modal-header">
+            <h2>Privacy Policy</h2>
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('modal-privacy').style.display='none'">Close</button>
+        </div>
+        <div class="modal-body" style="padding-top:20px;">
+            <p><strong>Effective Date:</strong> [DATE]</p>
+            <p>Welcome to [COMPANY NAME]. We respect your privacy and are committed to protecting your personal data.</p>
+            <h3>1. Data We Collect</h3>
+            <p>We collect device fingerprint data (canvas hash, screen resolution), IP addresses, and geolocation data strictly for security anomaly detection and account hijacking prevention.</p>
+            <h3>2. How We Use Your Data</h3>
+            <p>Data is used exclusively to train our ML models (Random Forest, Autoencoder) to protect your account. We do not sell your data.</p>
+            <h3>3. Contact Us</h3>
+            <p>If you have any questions, contact us at [SUPPORT EMAIL].</p>
+        </div>
+    </div>
+</div>
+
+<div id="modal-terms" class="modal" style="display:none;z-index:10000;">
+    <div class="modal-content" style="max-width:800px;text-align:left;overflow-y:auto;max-height:80vh;">
+        <div class="modal-header">
+            <h2>Terms of Service</h2>
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('modal-terms').style.display='none'">Close</button>
+        </div>
+        <div class="modal-body" style="padding-top:20px;">
+            <p><strong>Effective Date:</strong> [DATE]</p>
+            <p>By accessing [COMPANY NAME], you agree to these Terms.</p>
+            <h3>1. Authorized Use</h3>
+            <p>This is a security simulation platform. You are authorized to run attack simulations only against accounts you own or the provided demo accounts.</p>
+            <h3>2. Prohibited Conduct</h3>
+            <p>Unauthorized scanning, DDoS, or attacking infrastructure is strictly prohibited.</p>
+        </div>
+    </div>
+</div>
+
+<div id="modal-cookies" class="modal" style="display:none;z-index:10000;">
+    <div class="modal-content" style="max-width:800px;text-align:left;overflow-y:auto;max-height:80vh;">
+        <div class="modal-header">
+            <h2>Cookie Policy</h2>
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('modal-cookies').style.display='none'">Close</button>
+        </div>
+        <div class="modal-body" style="padding-top:20px;">
+            <p>We use local storage strictly for session persistence (<code>cyber_token</code>) and UI preferences (<code>theme</code>). We do NOT use third-party tracking cookies or advertising pixels.</p>
+        </div>
+    </div>
+</div>
+
 </body>
 </html>
+
+  <!-- Modal: Email Verification -->
+  <div id="modal-email-verification" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="verify-modal-title">
+    <div class="cyber-modal" style="max-width: 400px; text-align: center;">
+      <div class="modal-icon" style="background: rgba(56, 189, 248, 0.1); color: var(--accent-cyan); font-size: 2rem; border-radius: 50%; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">??</div>
+      <h2 id="verify-modal-title" style="color: #fff; margin-bottom: 10px;">Verify Your Email</h2>
+      <p style="color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 20px;">
+        We sent a 6-digit verification code via Amazon SNS to your email. Enter it below to activate your account.
+      </p>
+      
+      <form id="form-email-verify" onsubmit="submitEmailVerification(event)">
+        <input type="hidden" id="verify-email-hidden" value="">
+        <div class="form-group">
+          <input type="text" id="verify-code-input" class="form-input" required placeholder="Enter 6-digit code" style="text-align: center; font-size: 1.5rem; letter-spacing: 5px;" maxlength="6" pattern="\d{6}">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">Verify & Continue</button>
+      </form>
+    </div>
+  </div>
+

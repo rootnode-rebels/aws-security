@@ -161,6 +161,11 @@ async function apiFetch(endpoint, options = {}) {
     }
 
     const data = await res.json().catch(() => ({}));
+    
+    if (res.status === 500) {
+      showToast("Internal Server Error (500). Please try again later.", "error");
+    }
+    
     return { ok: res.ok, status: res.status, data };
   } catch (err) {
     if (!navigator.onLine) {
@@ -176,10 +181,18 @@ function switchTab(tabId) {
   document.querySelectorAll(".nav-btn").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.tab === tabId);
   });
+  let viewFound = false;
   document.querySelectorAll(".tab-view").forEach(view => {
     const isTarget = view.id === tabId || view.id === `view-${tabId}` || (tabId === "user-portal" && view.id === "view-user-portal");
+    if (isTarget) viewFound = true;
     view.classList.toggle("active", isTarget);
   });
+  
+  if (!viewFound) {
+    document.querySelectorAll(".tab-view").forEach(v => v.classList.remove("active"));
+    const view404 = document.getElementById("view-404");
+    if (view404) view404.classList.add("active");
+  }
 
   // Trigger sub-view initializations
   if (tabId === "attack-studio" && typeof initAttackSimulator === "function") {
@@ -558,3 +571,183 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }, 2500);
 });
+
+// ============================================================================
+// UI ENHANCEMENTS (Theme, Mobile, Accessibility, Shortcuts)
+// ============================================================================
+
+function toggleTheme() {
+  const body = document.body;
+  if (body.getAttribute("data-theme") === "light") {
+    body.removeAttribute("data-theme");
+  } else {
+    body.setAttribute("data-theme", "light");
+  }
+}
+
+function toggleMobileMenu() {
+  const sidebar = document.querySelector(".sidebar");
+  if (sidebar) sidebar.classList.toggle("mobile-open");
+}
+
+function acceptCookies() {
+  localStorage.setItem("cookies_accepted", "true");
+  const banner = document.getElementById("cookie-banner");
+  if (banner) banner.classList.remove("visible");
+}
+
+function setupPasswordToggles() {
+  document.querySelectorAll("input[type=\"password\"]").forEach(input => {
+    // Prevent double wrapping
+    if (input.parentNode.classList.contains("input-group-with-icon")) return;
+    
+    const wrapper = document.createElement("div");
+    wrapper.className = "input-group-with-icon";
+    input.parentNode.insertBefore(wrapper, input);
+    wrapper.appendChild(input);
+    
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "input-icon-btn";
+    btn.innerHTML = "???";
+    btn.title = "Toggle visibility";
+    btn.onclick = () => {
+      if (input.type === "password") {
+        input.type = "text";
+        btn.innerHTML = "??";
+      } else {
+        input.type = "password";
+        btn.innerHTML = "???";
+      }
+    };
+    wrapper.appendChild(btn);
+  });
+}
+
+function checkAdminUI() {
+  const adminBtn = document.querySelector("[data-tab=\"cms-dashboard\"]");
+  if (adminBtn) {
+    const isRoot = AppState.user && (AppState.user.is_root_admin || AppState.user.role === "SUPER_ADMIN");
+    adminBtn.parentElement.style.display = isRoot ? "block" : "none";
+  }
+}
+
+// Global Keyboard Shortcuts
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    document.querySelectorAll(".cyber-modal-overlay.active").forEach(m => m.classList.remove("active"));
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+    e.preventDefault();
+    showToast("Global Search feature coming soon...", "info");
+  }
+});
+
+// Scroll listener for back-to-top
+window.addEventListener("scroll", () => {
+  const btn = document.getElementById("back-to-top");
+  if (btn) {
+    if (window.scrollY > 300) btn.style.display = "flex";
+    else btn.style.display = "none";
+  }
+});
+
+// Initialize features on load
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(() => {
+    if (!localStorage.getItem("cookies_accepted")) {
+      const banner = document.getElementById("cookie-banner");
+      if (banner) banner.classList.add("visible");
+    }
+  }, 1000);
+  
+  setupPasswordToggles();
+});
+
+
+// ============================================================================
+// COPY TO CLIPBOARD HELPER
+// ============================================================================
+function copyToClipboard(text, btnElement) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => {
+      const originalText = btnElement.innerHTML;
+      btnElement.innerHTML = "? Copied!";
+      setTimeout(() => btnElement.innerHTML = originalText, 2000);
+    }).catch(err => {
+      console.error("Failed to copy:", err);
+      showToast("Failed to copy to clipboard", "error");
+    });
+  } else {
+    // Fallback
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+      document.execCommand("copy");
+      const originalText = btnElement.innerHTML;
+      btnElement.innerHTML = "? Copied!";
+      setTimeout(() => btnElement.innerHTML = originalText, 2000);
+    } catch (err) {
+      showToast("Failed to copy to clipboard", "error");
+    }
+    document.body.removeChild(textArea);
+  }
+}
+
+
+// ============================================================================
+// SKELETON LOADERS & EMPTY STATES HELPER
+// ============================================================================
+function renderSkeletonRows(containerId, count=3) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  let html = "";
+  for(let i=0; i<count; i++){
+    html += `<tr style="background:transparent;"><td colspan="10"><div class="skeleton" style="height:40px; width:100%;"></div></td></tr>`;
+  }
+  container.innerHTML = html;
+}
+
+function renderEmptyState(containerId, message) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = `
+    <tr><td colspan="10">
+      <div style="padding: 2rem; text-align: center; color: var(--text-dim);">
+        <span class="material-symbols-outlined" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;">inventory_2</span>
+        <div>${message}</div>
+      </div>
+    </td></tr>
+  `;
+}
+
+
+// ============================================================================
+// EMAIL VERIFICATION FLOW
+// ============================================================================
+async function submitEmailVerification(e) {
+  e.preventDefault();
+  const code = document.getElementById("verify-code-input").value;
+  const email = document.getElementById("verify-email-hidden").value;
+  
+  if (!code || !email) return;
+  
+  showToast("Verifying email...", "info");
+  const res = await apiFetch("/api/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ email: email, code: code })
+  });
+  
+  if (res.ok) {
+    showToast(res.data.message, "success");
+    closeModal("modal-email-verification");
+    document.getElementById("form-email-verify").reset();
+    // Re-render user portal or switch to login
+    switchTab("user-portal");
+  } else {
+    showToast(res.data?.detail || "Invalid verification code.", "error");
+  }
+}
+

@@ -632,5 +632,37 @@ class NotificationDispatcher:
         )
 
 
-# Global singleton dispatcher instance
+
+
+    def send_email_verification(self, email: str, full_name: str, code: str) -> Dict[str, Any]:
+        """Dispatches 6-digit email verification code via AWS SNS upon registration."""
+        subject = f"?? [AWS Security] Verify Your Email Address: {code}"
+        body_text = (
+            f"Welcome to AWS Security Defense, {full_name}!\n\n"
+            f"To complete your registration for {email}, please use the following verification code:\n\n"
+            f"    {code}\n\n"
+            f"This code will expire shortly. Do not share this code with anyone."
+        )
+        body_html = f"""
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; background: #0b1329; color: #e2e8f0; border-radius: 12px; padding: 24px; border: 1px solid #1e293b;">
+          <h2 style="color: #38bdf8; margin-top: 0;">?? Verify Your Email Address</h2>
+          <p style="color: #94a3b8; font-size: 14px;">Welcome, <strong>{full_name}</strong>. Please verify your email.</p>
+          <div style="background: #0f172a; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;">
+            <div style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #38bdf8; font-family: monospace;">{code}</div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 6px;">Single Use Code</div>
+          </div>
+          <div style="font-size: 11px; color: #64748b;">Delivered via Amazon SNS Push / Email Gateway</div>
+        </div>
+        """
+        return self.dispatch(
+            recipient_email=email,
+            subject=subject,
+            body_text=body_text,
+            body_html=body_html,
+            notification_type="EMAIL_VERIFICATION",
+            metadata={"code": code}
+        )
+# Global singleton dispatcher instance
 notification_service = NotificationDispatcher()
+
+
