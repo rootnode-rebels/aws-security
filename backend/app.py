@@ -107,6 +107,7 @@ def seed_demo_user_if_needed(force: bool = False):
         pass
 
     accounts = [
+        ("demouser@mail.com", "DemoUser.AWS@29", "AWS Presentation Demo User", "USER"),
         ("demo@awssecurity.io", os.getenv("DEMO_PWD_1", secrets.token_urlsafe(16)), "Sachin (Demo Security Lead)", "ROOT_ADMIN"),
         ("demo@aegisguard.io", os.getenv("DEMO_PWD_2", secrets.token_urlsafe(16)), "Sachin (Legacy Demo Account)", "ROOT_ADMIN")
     ]
@@ -440,7 +441,8 @@ def register(payload: RegisterSchema, request: Request):
         "status": "success",
         "message": "Account created. Please check your email for the verification code.",
         "requires_verification": True,
-        "email": clean_email
+        "email": clean_email,
+        "demo_verification_code": user_doc["email_verification_code"]
     }
 
 
@@ -878,7 +880,8 @@ def login(payload: LoginSchema, request: Request):
             "action": "STEP_UP_MFA",
             "message": "Unusual access pattern detected. Verification code has been sent to your Primary Device screen.",
             "risk_score": risk_score,
-            "temp_token": temp_token
+            "temp_token": temp_token,
+            "demo_mfa_code": otp
         }
 
     # Scenario C: LOW RISK -> ALLOW & ISSUE ACTIVE SESSION
