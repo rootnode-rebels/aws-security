@@ -221,7 +221,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0.35rem 0.85rem 0.35rem 1.15rem;
-  margin: 12px auto 0 auto;
+  margin: 14px auto 1.75rem auto;
   max-width: 1440px;
   width: calc(100% - 24px);
   gap: 0.6rem;
@@ -444,12 +444,13 @@ body {
 /* ==========================================================================
    LAYOUT CONTAINERS & GRIDS
    ========================================================================== */
-.main-wrapper {
+.main-wrapper,
+.main-content {
   flex: 1;
   max-width: 1360px;
   width: 100%;
   margin: 0 auto;
-  padding: 1.75rem 1.25rem 3rem 1.25rem;
+  padding: 0.75rem 1.25rem 3rem 1.25rem;
 }
 
 .tab-view {
