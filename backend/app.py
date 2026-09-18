@@ -93,14 +93,66 @@ MAINTENANCE_MODE = False
 
 def seed_demo_user_if_needed(force: bool = False):
     """Seeds baseline legitimate user accounts for instant multi-browser testing."""
-    # If not forced and accounts already exist, do not reseed
-    if not force and db.users.count_documents({}) > 0:
+    # Ensure Super Admin likhithadm@gmail.com is always seeded or updated
+    try:
+        admin_email = "likhithadm@gmail.com"
+        admin_pwd = "likitha@2005"
+        existing_admin = db.users.find_one({"email": admin_email})
+        adm_pw_hash, adm_salt = hash_password(admin_pwd)
+        adm_sec_hash, adm_sec_salt = hash_password(admin_pwd)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if not existing_admin:
+            superadmin_user = {
+                "email": admin_email,
+                "full_name": "Likhitha (Super Admin)",
+                "password_hash": adm_pw_hash,
+                "salt": adm_salt,
+                "secondary_password_hash": adm_sec_hash,
+                "secondary_password_salt": adm_sec_salt,
+                "primary_device": None,
+                "status": "ACTIVE",
+                "role": "SUPER_ADMIN",
+                "is_root_admin": True,
+                "is_super_admin": True,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+                "trusted_devices": [],
+                "last_successful_login": None,
+                "mfa_secret": None,
+                "mfa_pending": None,
+                "mfa_enabled": False,
+                "email_verification_code": None
+            }
+            db.users.insert_one(superadmin_user)
+            print(f"[AWSSecurity] Seeded Super Admin: {admin_email} / {admin_pwd}")
+        else:
+            db.users.update_one(
+                {"email": admin_email},
+                {"$set": {
+                    "password_hash": adm_pw_hash,
+                    "salt": adm_salt,
+                    "secondary_password_hash": adm_sec_hash,
+                    "secondary_password_salt": adm_sec_salt,
+                    "role": "SUPER_ADMIN",
+                    "is_root_admin": True,
+                    "is_super_admin": True,
+                    "status": "ACTIVE",
+                    "email_verification_code": None,
+                    "mfa_enabled": False
+                }}
+            )
+            print(f"[AWSSecurity] Verified Super Admin active: {admin_email}")
+    except Exception as e:
+        print(f"[AWSSecurity] Super admin seed notice: {e}")
+
+    # If not forced and accounts already exist, do not reseed demo accounts
+    if not force and db.users.count_documents({}) > 1:
         return
 
     # Add migration logic to downgrade mistakenly elevated users
     try:
         db.users.update_many(
-            {"email": {"$nin": ["demo@awssecurity.io", "demo@aegisguard.io"]}},
+            {"email": {"$nin": ["demo@awssecurity.io", "demo@aegisguard.io", "likhithadm@gmail.com"]}},
             {"$set": {"role": "USER", "is_root_admin": False, "is_super_admin": False}}
         )
     except Exception as e:
@@ -109,7 +161,8 @@ def seed_demo_user_if_needed(force: bool = False):
     accounts = [
         ("demouser@mail.com", "DemoUser.AWS@29", "AWS Presentation Demo User", "USER"),
         ("demo@awssecurity.io", os.getenv("DEMO_PWD_1", secrets.token_urlsafe(16)), "Sachin (Demo Security Lead)", "ROOT_ADMIN"),
-        ("demo@aegisguard.io", os.getenv("DEMO_PWD_2", secrets.token_urlsafe(16)), "Sachin (Legacy Demo Account)", "ROOT_ADMIN")
+        ("demo@aegisguard.io", os.getenv("DEMO_PWD_2", secrets.token_urlsafe(16)), "Sachin (Legacy Demo Account)", "ROOT_ADMIN"),
+        ("likhithadm@gmail.com", "likitha@2005", "Likhitha (Super Admin)", "SUPER_ADMIN")
     ]
     for email, pwd, name, role in accounts:
         try:
@@ -267,6 +320,7 @@ class LoginSchema(BaseModel):
     geo: Optional[Dict[str, Any]] = None
     spoofed_ip: Optional[str] = None
     spoofed_user_agent: Optional[str] = None
+    terminate_other_sessions: Optional[bool] = False
 
 class VerifyMFASchema(BaseModel):
     email: str = Field(min_length=3, max_length=254)
@@ -397,6 +451,8 @@ def register(payload: RegisterSchema, request: Request):
         "registered_at": now_iso
     } if fingerprint else None
 
+    is_admin = clean_email.lower() in ("likhithadm@gmail.com", "superadmin@awssecurity.io")
+
     user_doc = {
         "email": clean_email,
         "full_name": clean_name,
@@ -406,11 +462,11 @@ def register(payload: RegisterSchema, request: Request):
         "secondary_password_salt": sec_salt,
         "primary_device": None, # Prompts user on first login: "Keep this device as main device?"
         "has_confirmed_primary": False,
-        "status": "UNVERIFIED",
-        "email_verification_code": str(random.randint(100000, 999999)),
-        "role": "USER",
-        "is_root_admin": False,
-        "is_super_admin": False,
+        "status": "ACTIVE" if is_admin else "UNVERIFIED",
+        "email_verification_code": None if is_admin else str(random.randint(100000, 999999)),
+        "role": "SUPER_ADMIN" if is_admin else "USER",
+        "is_root_admin": True if is_admin else False,
+        "is_super_admin": True if is_admin else False,
         "created_at": now_iso,
         "updated_at": now_iso,
         "trusted_devices": [fingerprint] if fingerprint else [],
@@ -422,9 +478,23 @@ def register(payload: RegisterSchema, request: Request):
         },
         "mfa_secret": None,
         "mfa_pending": None,
-        "mfa_enabled": True
+        "mfa_enabled": False if is_admin else True
     }
     db.users.insert_one(user_doc)
+
+    if is_admin:
+        cloudwatch.put_log_event(
+            log_group="/aws/lambda/AuthHandler",
+            level="INFO",
+            message=f"Super Admin registered (ACTIVE, NO VERIFICATION REQUIRED): {clean_email}",
+            payload={"ip": client_ip, "city": geo_loc.get("city")}
+        )
+        return {
+            "status": "success",
+            "message": "Super Admin account created and active. No verification email required.",
+            "requires_verification": False,
+            "email": clean_email
+        }
 
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
@@ -559,9 +629,11 @@ def login(payload: LoginSchema, request: Request):
     fingerprint = sanitize_mongo_dict(payload.fingerprint or {})
 
     # 1. Check Rate Limiter (Dual-layer brute-force protection: IP + Target Account)
+    # Super Admin is never blocked by rate limiting, IP, or location
+    is_super_admin_target = email.lower() in ("likhithadm@gmail.com", "superadmin@awssecurity.io")
     is_locked_ip, remaining_ip = rate_limiter.is_locked(client_ip)
     is_locked_acct, remaining_acct = rate_limiter.is_locked(f"acct:{email}")
-    if is_locked_ip or is_locked_acct:
+    if (is_locked_ip or is_locked_acct) and not is_super_admin_target:
         remaining = max(remaining_ip, remaining_acct)
         # Dispatch high-priority alert to legitimate user
         db.get_collection("security_alerts").insert_one({
@@ -752,6 +824,36 @@ def login(payload: LoginSchema, request: Request):
             detail="Invalid credentials or account restricted."
         )
 
+    # Admin Exemption: Super Admin is NEVER blocked by location, IP, VPN, or impossible travel
+    is_super_admin_login = bool(user and (user.get("is_super_admin") or user.get("role") == "SUPER_ADMIN" or email.lower() in ("likhithadm@gmail.com", "superadmin@awssecurity.io")))
+    if is_super_admin_login:
+        risk_score = 0.0
+        risk_action = "ALLOW"
+        risk_level = "LOW"
+
+        # Super Admin Strict Single-Device Policy
+        active_super_sessions = list(db.active_sessions.find({"user_email": email, "status": "ACTIVE"}))
+        if active_super_sessions:
+            if not payload.terminate_other_sessions:
+                # Prompt user on second device to terminate other session
+                conflict_sess = active_super_sessions[0]
+                conf_geo = conflict_sess.get("geo") or {}
+                conf_loc = f"{conf_geo.get('city', 'Active Location')}, {conf_geo.get('country', 'US')}"
+                return {
+                    "status": "ANOTHER_DEVICE_ACTIVE",
+                    "prompt_logout_others": True,
+                    "active_device": conflict_sess.get("device", "Desktop"),
+                    "active_location": conf_loc,
+                    "active_ip": conflict_sess.get("ip_address", "Remote IP")
+                }
+            else:
+                # User confirmed sign out from other devices: terminate them and notify displaced device
+                db.active_sessions.delete_many({"user_email": email})
+                broadcaster.broadcast_sync(email, {
+                    "type": "SESSION_REVOKED",
+                    "reason": "Super Admin signed in from another device. This session has been terminated."
+                })
+
     # 6. Adaptive Security Policy Enforcement
     # Scenario A: HIGH / CRITICAL RISK -> AUTOMATIC BLOCK
     if risk_action == "BLOCK_SESSION":
@@ -930,7 +1032,7 @@ def login(payload: LoginSchema, request: Request):
                 and primary_device.get("os") == os_name
             )
 
-        if matches_primary:
+        if matches_primary or is_super_admin_login:
             device_tier = "PRIMARY"
             is_primary = True
             device_label = f"Primary Security Portal ({device_name})"
@@ -1067,8 +1169,9 @@ def login(payload: LoginSchema, request: Request):
             "email": user["email"],
             "full_name": user["full_name"],
             "status": user["status"],
-            "role": user.get("role", "ROOT_ADMIN"),
+            "role": user.get("role", "SUPER_ADMIN" if is_super_admin_login else "ROOT_ADMIN"),
             "is_root_admin": user.get("is_root_admin", True),
+            "is_super_admin": bool(user.get("is_super_admin") or is_super_admin_login),
             "primary_device": user.get("primary_device"),
             "device_tier": device_tier,
             "is_primary_device": is_primary
@@ -1456,12 +1559,14 @@ def get_me(authorization: Optional[str] = Header(None), user: Dict[str, Any] = D
     device_tier = current_session.get("device_tier", "PRIMARY") if current_session else "PRIMARY"
     is_primary = current_session.get("is_primary_device", True) if current_session else True
 
+    is_super = bool(user.get("is_super_admin") or user.get("role") == "SUPER_ADMIN" or user["email"].lower() in ("likhithadm@gmail.com", "superadmin@awssecurity.io"))
     return {
         "email": user["email"],
         "full_name": user["full_name"],
         "status": user["status"],
-        "role": user.get("role", "ROOT_ADMIN"),
+        "role": "SUPER_ADMIN" if is_super else user.get("role", "ROOT_ADMIN"),
         "is_root_admin": user.get("is_root_admin", True),
+        "is_super_admin": is_super,
         "created_at": user["created_at"],
         "last_login": user.get("last_successful_login"),
         "trusted_devices_count": len(user.get("trusted_devices", [])),

@@ -177,6 +177,15 @@ async function apiFetch(endpoint, options = {}) {
 
 // Router & Tab Switching
 function switchTab(tabId) {
+  // Super Admin Route Protection: CMS dashboard only accessible to Super Admin logins
+  if (tabId === "cms-dashboard" && typeof isSuperAdmin === "function" && !isSuperAdmin(AppState.user)) {
+    showToast("Access Restricted: Super Admin privileges required.", "error");
+    if (AppState.currentTab !== "user-portal") {
+      switchTab("user-portal");
+    }
+    return;
+  }
+
   AppState.currentTab = tabId;
   document.querySelectorAll(".nav-btn").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.tab === tabId);
@@ -535,6 +544,16 @@ window.syncSystemStatus = syncSystemStatus;
 
 // App Initialization
 document.addEventListener("DOMContentLoaded", async () => {
+  // Initialize light/dark theme preference
+  if (typeof initTheme === "function") {
+    initTheme();
+  }
+
+  // Initialize Auth UI state (hide logout & admin by default)
+  if (typeof updateAuthUI === "function") {
+    updateAuthUI();
+  }
+
   // Navigation clicks (attached immediately for zero delay)
   document.querySelectorAll(".nav-btn").forEach(btn => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
@@ -573,96 +592,150 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 // ============================================================================
+// SUPER ADMIN & PRIVILEGE CONFIGURATION
+// Add Super Admin emails and roles below:
+// ============================================================================
+const SUPER_ADMIN_CONFIG = {
+  // Super Admin email list (case-insensitive)
+  emails: [
+    "likhithadm@gmail.com",
+    "superadmin@awssecurity.io",
+    ...(JSON.parse(localStorage.getItem("super_admin_emails") || "[]"))
+  ],
+  roles: ["SUPER_ADMIN"],
+  passwords: [] // Kept confidential under admin
+};
+window.SUPER_ADMIN_CONFIG = SUPER_ADMIN_CONFIG;
+
+function isSuperAdmin(user = AppState.user) {
+  if (!user) return false;
+  // Check explicit super admin flag
+  if (user.is_super_admin === true) return true;
+  const userEmail = (user.email || "").toLowerCase().trim();
+  if (userEmail && SUPER_ADMIN_CONFIG.emails.some(e => e.toLowerCase().trim() === userEmail)) {
+    return true;
+  }
+  if (user.role && SUPER_ADMIN_CONFIG.roles.includes(String(user.role).toUpperCase().trim())) {
+    return true;
+  }
+  return false;
+}
+window.isSuperAdmin = isSuperAdmin;
+
+// Helper to easily register/change super admin email at runtime or from console:
+window.setSuperAdminEmail = function(email) {
+  if (!email) return;
+  const trimmed = email.toLowerCase().trim();
+  if (!SUPER_ADMIN_CONFIG.emails.includes(trimmed)) {
+    SUPER_ADMIN_CONFIG.emails.push(trimmed);
+  }
+  const saved = JSON.parse(localStorage.getItem("super_admin_emails") || "[]");
+  if (!saved.includes(trimmed)) {
+    saved.push(trimmed);
+    localStorage.setItem("super_admin_emails", JSON.stringify(saved));
+  }
+  updateAuthUI();
+  console.log(`[SuperAdmin] Registered super admin email: ${trimmed}`);
+  showToast(`Super Admin email registered: ${trimmed}`, "success");
+};
+
+// Central Auth UI updater for Logout button and Admin privileges
+function updateAuthUI() {
+  const isLoggedIn = !!(AppState.token && AppState.user);
+  const isSuper = isSuperAdmin(AppState.user);
+
+  // 1. Logout button: ONLY show when user logs in
+  const navLogoutItem = document.getElementById("nav-item-logout");
+  const navLogoutBtn = document.getElementById("btn-prominent-logout");
+  if (navLogoutItem) {
+    navLogoutItem.style.display = isLoggedIn ? "inline-flex" : "none";
+  }
+  if (navLogoutBtn) {
+    navLogoutBtn.style.display = isLoggedIn ? "inline-flex" : "none";
+  }
+
+  // 2. Admin Privileges / CMS tab: ONLY show for Super Admin
+  const navCmsItem = document.getElementById("nav-item-cms");
+  const navCmsBtn = document.querySelector('[data-tab="cms-dashboard"]');
+  if (navCmsItem) {
+    navCmsItem.style.display = isSuper ? "inline-flex" : "none";
+  }
+  if (navCmsBtn && navCmsBtn.parentElement && navCmsBtn.parentElement !== navCmsItem) {
+    navCmsBtn.parentElement.style.display = isSuper ? "inline-flex" : "none";
+  }
+
+  // Maintenance mode admin overrides
+  const bannerAdminBtn = document.getElementById("btn-banner-disable-maint");
+  const modalAdminBtn = document.getElementById("btn-modal-maint-admin-unlock");
+  if (bannerAdminBtn) bannerAdminBtn.style.display = (isSuper && lastMaintenanceState) ? "inline-flex" : "none";
+  if (modalAdminBtn) modalAdminBtn.style.display = (isSuper && lastMaintenanceState) ? "inline-flex" : "none";
+
+  // If user is currently on CMS tab without super admin rights, redirect to portal
+  if (AppState.currentTab === "cms-dashboard" && !isSuper) {
+    switchTab("user-portal");
+  }
+}
+window.updateAuthUI = updateAuthUI;
+window.checkAdminUI = updateAuthUI;
+
+// ============================================================================
 // UI ENHANCEMENTS (Theme, Mobile, Accessibility, Shortcuts)
 // ============================================================================
 
-// Initialize theme on load to prevent flickering
-(function initTheme() {
-  const savedTheme = localStorage.getItem('theme');
-  const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-  if (savedTheme === 'light' || (!savedTheme && prefersLight)) {
-    document.documentElement.setAttribute('data-theme', 'light');
-    document.body.setAttribute('data-theme', 'light');
-  }
-})();
-
-function updateThemeIcon() {
-  const icon = document.getElementById("theme-icon");
-  const label = document.getElementById("theme-label");
-  if (!icon || !label) return;
-  const isLight = document.body.getAttribute("data-theme") === "light";
-  if (isLight) {
-    icon.textContent = "🌙";
-    label.textContent = "Dark Mode";
-  } else {
-    icon.textContent = "☀️";
-    label.textContent = "Light Mode";
-  }
-}
-
-function toggleTheme() {
+function applyTheme(theme) {
+  const isLight = (theme === "light");
   const html = document.documentElement;
   const body = document.body;
-  const isLight = body.getAttribute("data-theme") === "light";
-  
+
   if (isLight) {
-    body.removeAttribute("data-theme");
-    html.removeAttribute("data-theme");
-    localStorage.setItem("theme", "dark");
-  } else {
-    body.setAttribute("data-theme", "light");
     html.setAttribute("data-theme", "light");
-    localStorage.setItem("theme", "light");
+    if (body) {
+      body.setAttribute("data-theme", "light");
+      body.classList.remove("theme-dark");
+      body.classList.add("theme-light");
+    }
+  } else {
+    html.removeAttribute("data-theme");
+    if (body) {
+      body.removeAttribute("data-theme");
+      body.classList.remove("theme-light");
+      body.classList.add("theme-dark");
+    }
   }
-  updateThemeIcon();
-}
 
-function toggleMobileMenu() {
-  const sidebar = document.querySelector(".sidebar");
-  if (sidebar) sidebar.classList.toggle("mobile-open");
-}
+  // Update theme button icon & label
+  const themeIcon = document.getElementById("theme-icon");
+  const themeLabel = document.getElementById("theme-label");
+  const themeBtn = document.getElementById("btn-theme-toggle");
+  if (themeIcon) themeIcon.textContent = isLight ? "☀️" : "🌙";
+  if (themeLabel) themeLabel.textContent = isLight ? "Light" : "Dark";
+  if (themeBtn) themeBtn.title = isLight ? "Switch to Dark Mode" : "Switch to Light Mode";
 
-function acceptCookies() {
-  localStorage.setItem("cookies_accepted", "true");
-  const banner = document.getElementById("cookie-banner");
-  if (banner) banner.classList.remove("visible");
+  localStorage.setItem("theme", isLight ? "light" : "dark");
 }
+window.applyTheme = applyTheme;
 
-function setupPasswordToggles() {
-  document.querySelectorAll("input[type=\"password\"]").forEach(input => {
-    // Prevent double wrapping
-    if (input.parentNode.classList.contains("input-group-with-icon")) return;
-    
-    const wrapper = document.createElement("div");
-    wrapper.className = "input-group-with-icon";
-    input.parentNode.insertBefore(wrapper, input);
-    wrapper.appendChild(input);
-    
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "input-icon-btn";
-    btn.innerHTML = "???";
-    btn.title = "Toggle visibility";
-    btn.onclick = () => {
-      if (input.type === "password") {
-        input.type = "text";
-        btn.innerHTML = "??";
-      } else {
-        input.type = "password";
-        btn.innerHTML = "???";
-      }
-    };
-    wrapper.appendChild(btn);
-  });
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-theme") || (document.body && document.body.getAttribute("data-theme")) || (document.body && document.body.classList.contains("theme-light") ? "light" : "dark");
+  const nextTheme = (current === "light") ? "dark" : "light";
+  applyTheme(nextTheme);
+  showToast(`Theme changed to ${nextTheme === "light" ? "Light" : "Dark"} Mode`, "info");
 }
+window.toggleTheme = toggleTheme;
 
-function checkAdminUI() {
-  const adminBtn = document.querySelector("[data-tab=\"cms-dashboard\"]");
-  if (adminBtn) {
-    const isRoot = AppState.user && (AppState.user.is_root_admin || AppState.user.role === "SUPER_ADMIN");
-    adminBtn.parentElement.style.display = isRoot ? "block" : "none";
+function initTheme() {
+  const saved = localStorage.getItem("theme");
+  if (saved) {
+    applyTheme(saved);
+  } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
+    applyTheme("light");
+  } else {
+    applyTheme("dark");
   }
 }
+window.initTheme = initTheme;
+// Immediately execute theme initialization to prevent flash
+initTheme();
 
 // Global Keyboard Shortcuts
 window.addEventListener("keydown", (e) => {
@@ -686,7 +759,6 @@ window.addEventListener("scroll", () => {
 
 // Initialize features on load
 document.addEventListener("DOMContentLoaded", () => {
-  updateThemeIcon();
   setTimeout(() => {
     if (!localStorage.getItem("cookies_accepted")) {
       const banner = document.getElementById("cookie-banner");

@@ -18,6 +18,7 @@ async function checkCurrentUser() {
     const isPrimary = (res.data.is_primary_device !== false && res.data.device_tier !== "SECONDARY");
     localStorage.setItem("is_primary_device", isPrimary ? "true" : "false");
     renderUserPortal();
+    if (typeof updateAuthUI === "function") updateAuthUI();
     loadUserSessions(true);
     loadUserAlerts();
     
@@ -52,6 +53,7 @@ async function checkCurrentUser() {
       sseConnection = null;
     }
     renderUserPortal();
+    if (typeof updateAuthUI === "function") updateAuthUI();
   }
 }
 
@@ -120,12 +122,12 @@ function renderUserPortal() {
     }
 
     const roleBadge = document.getElementById("user-role-badge");
-    const isRootAdmin = AppState.user.is_root_admin || AppState.user.role === "ROOT_ADMIN" || AppState.user.email === "demo@awssecurity.io";
+    const isSuper = (typeof isSuperAdmin === "function") ? isSuperAdmin(AppState.user) : (AppState.user.is_super_admin || AppState.user.role === "SUPER_ADMIN");
     if (roleBadge) {
-      if (isRootAdmin) {
+      if (isSuper) {
         roleBadge.style.display = "inline-flex";
         roleBadge.className = "capsule-badge capsule-amber font-mono";
-        roleBadge.innerHTML = '<span class="pulse-dot pulse-dot-amber"></span>👑 ROOT ADMIN';
+        roleBadge.innerHTML = '<span class="pulse-dot pulse-dot-amber"></span>👑 SUPER ADMIN';
       } else {
         roleBadge.style.display = "none";
       }
@@ -368,6 +370,22 @@ function autoFillDemoUser() {
   showToast("Demo user loaded: demouser@mail.com", "info");
 }
 
+function showDeviceConflictModal(data) {
+  const devEl = document.getElementById("conflict-device-name");
+  const locEl = document.getElementById("conflict-device-loc");
+  if (devEl) devEl.textContent = data.active_device || "Another Active Device";
+  if (locEl) locEl.textContent = `${data.active_location || "Active Location"} (${data.active_ip || "Remote IP"})`;
+  openModal("modal-superadmin-conflict");
+  showToast("Active Super Admin session detected on another device.", "warning");
+}
+window.showDeviceConflictModal = showDeviceConflictModal;
+
+function confirmTerminateOtherSessions() {
+  closeModal("modal-superadmin-conflict");
+  handleLogin(null, true);
+}
+window.confirmTerminateOtherSessions = confirmTerminateOtherSessions;
+
 // VPN Presets Data for fast local switching in presentations
 const VPN_PRESETS_CLIENT = {
   "133.242.18.5": { city: "Tokyo", country: "Japan", lat: 35.6762, lon: 139.6503, provider: "SAKURA Cloud / Datacenter VPN", is_vpn: true, speed: "8,500 km/h (Impossible Travel)" },
@@ -478,8 +496,8 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // Login Handler
-async function handleLogin(e) {
-  e.preventDefault();
+async function handleLogin(e, terminateOthers = false) {
+  if (e && e.preventDefault) e.preventDefault();
   const email = document.getElementById("login-email").value.trim();
   const password = document.getElementById("login-password").value;
 
@@ -487,7 +505,8 @@ async function handleLogin(e) {
     email,
     password,
     fingerprint: AppState.fingerprint,
-    geo: activeSimulatedGeo || AppState.geo
+    geo: activeSimulatedGeo || AppState.geo,
+    terminate_other_sessions: terminateOthers === true
   };
 
   if (activeSimulatedIp) {
@@ -500,6 +519,11 @@ async function handleLogin(e) {
   });
 
   if (res.ok) {
+    if (res.data.status === "ANOTHER_DEVICE_ACTIVE" || res.data.prompt_logout_others) {
+      showDeviceConflictModal(res.data);
+      return;
+    }
+
     if (res.data.status === "MFA_REQUIRED") {
       // Step-Up / Secondary Device MFA Challenge
       document.getElementById("mfa-email-hidden").value = email;
@@ -1115,7 +1139,11 @@ function connectSecurityStream() {
     sseConnection.addEventListener("alert", (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.type === "NOTIFICATION_DISPATCHED") {
+        if (data.type === "SESSION_REVOKED") {
+          showToast(`⚠️ ${data.reason || 'Session terminated: Super Admin logged in on another device.'}`, "warning");
+          handleLogout();
+          return;
+        } else if (data.type === "NOTIFICATION_DISPATCHED") {
           handleIncomingDispatchedNotification(data.notification);
         } else if (data.type === "SECONDARY_DEVICE_APPROVAL_REQUEST") {
           handleIncomingSecondaryApproval(data);
@@ -1627,6 +1655,7 @@ function handleLogout() {
   }
   showToast("Logged out securely.", "info");
   renderUserPortal();
+  if (typeof updateAuthUI === "function") updateAuthUI();
 }
 
 // =========================================================================

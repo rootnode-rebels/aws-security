@@ -17,6 +17,10 @@ document.addEventListener('DOMContentLoaded', () => {
  * Main loader for CMS data
  */
 async function cmsLoadData() {
+  if (typeof isSuperAdmin === 'function' && !isSuperAdmin(AppState.user)) {
+    console.warn('[CMS] Super Admin login required to load CMS data.');
+    return;
+  }
   await cmsFetchStats();
   await cmsFetchUsers();
 }
@@ -92,13 +96,13 @@ async function cmsFetchUsers() {
         ? '<span class="badge badge-critical font-mono">LOCKED</span>'
         : '<span class="badge badge-low font-mono">ACTIVE</span>';
 
-      const isRootAdmin = user.is_root_admin || user.role === 'ROOT_ADMIN' || user.email === 'demo@awssecurity.io';
+      const isSuper = (typeof isSuperAdmin === 'function') ? isSuperAdmin(user) : (user.is_super_admin || user.role === 'SUPER_ADMIN');
       
       tr.innerHTML = `
         <td>
           <div style="display: flex; align-items: center; gap: 0.4rem;">
             <strong>${user.full_name || user.name || 'User'}</strong>
-            ${isRootAdmin ? '<span class="badge badge-low font-mono" style="font-size: 0.65rem; color: var(--accent-amber); border-color: rgba(245, 158, 11, 0.4);" title="Root Administrator">👑 Root Admin</span>' : ''}
+            ${isSuper ? '<span class="badge badge-low font-mono" style="font-size: 0.65rem; color: var(--accent-amber); border-color: rgba(245, 158, 11, 0.4);" title="Super Administrator">👑 Super Admin</span>' : ''}
           </div>
         </td>
         <td><code class="font-mono text-cyan">${user.email}</code>&nbsp;<span class="copy-btn" onclick="copyToClipboard('${user.email}')" title="Copy Email">??</span></td>

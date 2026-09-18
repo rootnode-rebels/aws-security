@@ -83,17 +83,17 @@
             <span class="nav-icon">📜</span><span class="nav-label">Compliance</span>
           </button>
         </li>
-        <li>
+        <li id="nav-item-cms" style="display: none;">
           <button class="nav-btn" data-tab="cms-dashboard" id="nav-cms-dashboard" aria-controls="cms-dashboard" title="CMS Admin Console">
             <span class="nav-icon">⚙️</span><span class="nav-label">Admin</span>
           </button>
         </li>
-        <li>
-          <button class="nav-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Light/Dark Mode">
-            <span class="nav-icon" id="theme-icon">🌓</span><span class="nav-label" id="theme-label">Toggle Theme</span>
+        <li id="nav-item-theme">
+          <button class="nav-btn" id="btn-theme-toggle" onclick="toggleTheme()" title="Toggle Light/Dark Mode">
+            <span class="nav-icon" id="theme-icon">🌓</span><span class="nav-label" id="theme-label">Theme</span>
           </button>
         </li>
-        <li>
+        <li id="nav-item-logout" style="display: none;">
           <button class="nav-btn logout-btn prominent-logout" id="btn-prominent-logout" onclick="handleLogout()" title="End session and securely logout">
             <span class="nav-icon">🚪</span><span class="nav-label">Logout</span>
           </button>
@@ -2125,13 +2125,10 @@
     </div>
 </div>
 
-</body>
-</html>
-
   <!-- Modal: Email Verification -->
   <div id="modal-email-verification" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="verify-modal-title">
     <div class="cyber-modal" style="max-width: 400px; text-align: center;">
-      <div class="modal-icon" style="background: rgba(56, 189, 248, 0.1); color: var(--accent-cyan); font-size: 2rem; border-radius: 50%; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">??</div>
+      <div class="modal-icon" style="background: rgba(56, 189, 248, 0.1); color: var(--accent-cyan); font-size: 2rem; border-radius: 50%; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">✉️</div>
       <h2 id="verify-modal-title" style="color: #fff; margin-bottom: 10px;">Verify Your Email</h2>
       <p style="color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 20px;">
         We dispatched a 6-digit verification code via Amazon SNS. Enter it below to activate your account.
@@ -2146,4 +2143,31 @@
       </form>
     </div>
   </div>
+
+  <!-- Modal: Super Admin Single-Device Session Conflict -->
+  <div id="modal-superadmin-conflict" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="conflict-modal-title">
+    <div class="cyber-modal" style="max-width: 440px; text-align: center;">
+      <div class="modal-icon" style="background: rgba(245, 158, 11, 0.12); color: #fbbf24; font-size: 2.2rem; border-radius: 50%; width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">⚠️</div>
+      <h2 id="conflict-modal-title" style="color: #fff; margin-bottom: 10px;">Active Session on Another Device</h2>
+      <p style="color: var(--text-secondary); font-size: 0.92rem; margin-bottom: 14px; line-height: 1.5;">
+        Super Admin is currently signed in on:
+      </p>
+      <div style="background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: var(--radius-sm); padding: 0.75rem; margin-bottom: 18px; text-align: left; font-size: 0.82rem; font-family: var(--font-mono); color: #e2e8f0;">
+        <div>📱 <strong>Device:</strong> <span id="conflict-device-name">Another Device</span></div>
+        <div style="margin-top: 4px;">📍 <strong>Location:</strong> <span id="conflict-device-loc">Active Location</span></div>
+      </div>
+      <p style="color: var(--text-dim); font-size: 0.82rem; margin-bottom: 20px;">
+        Super Admin accounts are restricted to <strong>one active device</strong> at a time. Do you want to sign out other devices and log in here?
+      </p>
+      
+      <div style="display: flex; gap: 10px;">
+        <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="closeModal('modal-superadmin-conflict')">Cancel</button>
+        <button type="button" class="btn btn-warning" style="flex: 1.4;" onclick="confirmTerminateOtherSessions()">Sign Out Others & Sign In</button>
+      </div>
+    </div>
+  </div>
+
+  </div> <!-- Closing dashboard-container -->
+</body>
+</html>
 
