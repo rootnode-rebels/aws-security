@@ -769,6 +769,21 @@ document.addEventListener("DOMContentLoaded", () => {
   setupPasswordToggles();
 });
 
+// Cookie banner dismissal
+function acceptCookies() {
+  try {
+    localStorage.setItem("cookies_accepted", "true");
+  } catch (e) {
+    console.warn("Storage access issue:", e);
+  }
+  const banner = document.getElementById("cookie-banner");
+  if (banner) {
+    banner.classList.remove("visible");
+    banner.style.display = "none";
+  }
+}
+window.acceptCookies = acceptCookies;
+
 
 // ============================================================================
 // COPY TO CLIPBOARD HELPER
