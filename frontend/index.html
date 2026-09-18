@@ -262,7 +262,7 @@
 
             <div style="margin-top: 0.85rem; text-align: center;">
               <button type="button" class="btn btn-secondary btn-sm" onclick="openDispatchedMailbox()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.45rem; padding: 0.55rem; font-size: 0.8rem; border-color: rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.08); color: #bae6fd;" title="Open simulated Amazon SNS & Email inbox, password recovery tokens, and security alerts">
-                <span>📧 View Dispatched Amazon SNS Alerts</span>
+                <span>📧 View Dispatched SNS / Security Emails</span>
               </button>
             </div>
           </form>
@@ -1491,7 +1491,7 @@
     </div>
   </div>
 
-  <!-- Modal: Dispatched Notifications (Amazon SNS Alert Hub) -->
+  <!-- Modal: Dispatched Notifications (Amazon SNS & Email Inbox) -->
   <div id="modal-dispatched-notifications" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="sns-inbox-title">
     <div class="cyber-modal-box" style="max-width: 740px; max-height: 88vh; display: flex; flex-direction: column;">
       <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
@@ -1527,7 +1527,7 @@
         <div style="display: flex; align-items: center; gap: 0.5rem;">
           <span style="font-size: 1rem;">ℹ️</span>
           <span>
-            <strong style="color: #f1f5f9;">Offline Local Mode:</strong> All Amazon SNS alerts, OTPs, and recovery tokens are delivered instantly right here.
+            <strong style="color: #f1f5f9;">Offline Local Mode:</strong> All dispatched emails, OTPs, and recovery tokens are delivered instantly right here.
           </span>
         </div>
         <div style="font-size: 0.72rem; color: #38bdf8;">
@@ -2134,7 +2134,7 @@
       <div class="modal-icon" style="background: rgba(56, 189, 248, 0.1); color: var(--accent-cyan); font-size: 2rem; border-radius: 50%; width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">??</div>
       <h2 id="verify-modal-title" style="color: #fff; margin-bottom: 10px;">Verify Your Email</h2>
       <p style="color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 20px;">
-        We dispatched a 6-digit verification code via Amazon SNS. Enter it below to activate your account.
+        We sent a 6-digit verification code via Amazon SNS to your email. Enter it below to activate your account.
       </p>
       
       <form id="form-email-verify" onsubmit="submitEmailVerification(event)">
