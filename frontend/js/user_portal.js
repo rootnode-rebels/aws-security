@@ -323,7 +323,16 @@ async function handleRegister(e) {
       document.getElementById("verify-email-hidden").value = res.data.email;
       openModal("modal-email-verification");
       
-
+      // Auto-fill code for demo environment since real SNS email is offline
+      if (res.data.demo_verification_code) {
+        setTimeout(() => {
+          const verifyInput = document.getElementById("verify-code-input");
+          if (verifyInput) {
+            verifyInput.value = res.data.demo_verification_code;
+            showToast("Demo auto-fill: Verification code injected.", "info");
+          }
+        }, 600);
+      }
     } else {
       showToast("Account created successfully! Please sign in.", "success");
       switchAuthTab("login");
@@ -507,6 +516,16 @@ async function handleLogin(e) {
 
       openModal("modal-mfa-challenge");
       showToast("Verification code dispatched to your Primary Device screen.", "warning");
+
+      // Auto-fill MFA code for demo environment
+      if (res.data.demo_mfa_code) {
+        setTimeout(() => {
+          if (codeInput) {
+            codeInput.value = res.data.demo_mfa_code;
+            showToast("Demo auto-fill: MFA code injected.", "info");
+          }
+        }, 600);
+      }
 
       // Start automatic cross-device polling: if Primary Device clicks 'Approve Device', sign in automatically!
       if (window.mfaPollInterval) clearInterval(window.mfaPollInterval);

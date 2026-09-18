@@ -441,7 +441,8 @@ def register(payload: RegisterSchema, request: Request):
         "status": "success",
         "message": "Account created. Verification code dispatched via Amazon SNS.",
         "requires_verification": True,
-        "email": clean_email
+        "email": clean_email,
+        "demo_verification_code": user_doc["email_verification_code"]
     }
 
 
@@ -879,7 +880,8 @@ def login(payload: LoginSchema, request: Request):
             "action": "STEP_UP_MFA",
             "message": "Unusual access pattern detected. Verification code dispatched via Amazon SNS to your Primary Device screen.",
             "risk_score": risk_score,
-            "temp_token": temp_token
+            "temp_token": temp_token,
+            "demo_mfa_code": otp
         }
 
     # Scenario C: LOW RISK -> ALLOW & ISSUE ACTIVE SESSION
