@@ -271,17 +271,20 @@
           <form id="form-register" style="display: none;" onsubmit="handleRegister(event)">
             <div class="form-group">
               <label class="form-label" for="reg-name">Full Name</label>
-              <input type="text" id="reg-name" class="form-input" placeholder="Sachin Kumar" required autocomplete="name">
+              <input type="text" id="reg-name" class="form-input" placeholder="Demo User" required autocomplete="name">
             </div>
 
             <div class="form-group">
               <label class="form-label" for="reg-email">Work Email</label>
-              <input type="email" id="reg-email" class="form-input" placeholder="sachin@domain.com" required autocomplete="email">
+              <input type="email" id="reg-email" class="form-input" placeholder="demo@domain.com" required autocomplete="email">
             </div>
 
             <div class="form-group">
               <label class="form-label" for="reg-password">Password</label>
-              <input type="password" id="reg-password" class="form-input" placeholder="Min 8 characters" required oninput="checkPasswordStrength(this.value)">
+              <div style="position: relative;">
+                <input type="password" id="reg-password" class="form-input" placeholder="Min 8 characters" required oninput="checkPasswordStrength(this.value)" style="padding-right: 42px;">
+                <button type="button" onclick="togglePasswordVisibility('reg-password', this)" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1rem; padding: 4px;" title="Show/Hide Password">👁️</button>
+              </div>
               <div class="strength-container">
                 <div class="strength-bar-track">
                   <div id="pw-strength-bar" class="strength-bar-fill"></div>
@@ -1829,7 +1832,7 @@
         <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
           <h4 style="color: var(--accent-emerald); font-size: 0.9rem; margin-bottom: 0.3rem;">Step 1: Legitimate User Login (Browser 1)</h4>
           <ol style="font-size: 0.82rem; color: var(--text-muted); padding-left: 1.25rem; line-height: 1.6;">
-            <li>In Browser 1, click <strong>"👤 Fill Demo User (Sachin)"</strong>. Credentials <code>demo@awssecurity.io</code> and <code>AWSSecurity#2026</code> auto-fill.</li>
+            <li>In Browser 1, click <strong>"👤 Fill Demo User"</strong>. Credentials <code>demouser@mail.com</code> auto-fill.</li>
             <li>Click <strong>"Sign In"</strong>. The dashboard loads showing Active Session in New York.</li>
             <li>Keep Browser 1 open on the <strong>User Portal</strong> view. Observe the <code>🟢 LIVE SYNC: 2s</code> beacon.</li>
           </ol>

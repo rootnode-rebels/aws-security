@@ -160,8 +160,8 @@ def seed_demo_user_if_needed(force: bool = False):
 
     accounts = [
         ("demouser@mail.com", "DemoUser.AWS@29", "AWS Presentation Demo User", "USER"),
-        ("demo@awssecurity.io", os.getenv("DEMO_PWD_1", secrets.token_urlsafe(16)), "Sachin (Demo Security Lead)", "ROOT_ADMIN"),
-        ("demo@aegisguard.io", os.getenv("DEMO_PWD_2", secrets.token_urlsafe(16)), "Sachin (Legacy Demo Account)", "ROOT_ADMIN"),
+        ("demo@awssecurity.io", os.getenv("DEMO_PWD_1", secrets.token_urlsafe(16)), "Demo Security Lead", "ROOT_ADMIN"),
+        ("demo@aegisguard.io", os.getenv("DEMO_PWD_2", secrets.token_urlsafe(16)), "Demo Account", "ROOT_ADMIN"),
         ("likhithadm@gmail.com", "likitha@2005", "Likhitha (Super Admin)", "SUPER_ADMIN")
     ]
     for email, pwd, name, role in accounts:
@@ -462,8 +462,8 @@ def register(payload: RegisterSchema, request: Request):
         "secondary_password_salt": sec_salt,
         "primary_device": None, # Prompts user on first login: "Keep this device as main device?"
         "has_confirmed_primary": False,
-        "status": "ACTIVE" if is_admin else "UNVERIFIED",
-        "email_verification_code": None if is_admin else str(random.randint(100000, 999999)),
+        "status": "ACTIVE",
+        "email_verification_code": None,
         "role": "SUPER_ADMIN" if is_admin else "USER",
         "is_root_admin": True if is_admin else False,
         "is_super_admin": True if is_admin else False,
@@ -482,37 +482,18 @@ def register(payload: RegisterSchema, request: Request):
     }
     db.users.insert_one(user_doc)
 
-    if is_admin:
-        cloudwatch.put_log_event(
-            log_group="/aws/lambda/AuthHandler",
-            level="INFO",
-            message=f"Super Admin registered (ACTIVE, NO VERIFICATION REQUIRED): {clean_email}",
-            payload={"ip": client_ip, "city": geo_loc.get("city")}
-        )
-        return {
-            "status": "success",
-            "message": "Super Admin account created and active. No verification email required.",
-            "requires_verification": False,
-            "email": clean_email
-        }
-
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
         level="INFO",
-        message=f"User registered (UNVERIFIED): {clean_email}",
+        message=f"User registered (ACTIVE, DIRECT SIGN-IN): {clean_email}",
         payload={"ip": client_ip, "city": geo_loc.get("city")}
     )
 
-    # Dispatch email verification code via Amazon SNS
-    notif = notification_service.send_email_verification(clean_email, clean_name, user_doc["email_verification_code"])
-    broadcaster.broadcast_sync(clean_email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
-
     return {
         "status": "success",
-        "message": "Account created. Verification code dispatched via Amazon SNS.",
-        "requires_verification": True,
-        "email": clean_email,
-        "demo_verification_code": user_doc["email_verification_code"]
+        "message": "Account created successfully! You can now sign in.",
+        "requires_verification": False,
+        "email": clean_email
     }
 
 
