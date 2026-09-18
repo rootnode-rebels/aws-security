@@ -439,7 +439,7 @@ def register(payload: RegisterSchema, request: Request):
 
     return {
         "status": "success",
-        "message": "Account created. Please check your email for the verification code.",
+        "message": "Account created. Verification code dispatched via Amazon SNS.",
         "requires_verification": True,
         "email": clean_email,
         "demo_verification_code": user_doc["email_verification_code"]
@@ -878,7 +878,7 @@ def login(payload: LoginSchema, request: Request):
         return {
             "status": "MFA_REQUIRED",
             "action": "STEP_UP_MFA",
-            "message": "Unusual access pattern detected. Verification code has been sent to your Primary Device screen.",
+            "message": "Unusual access pattern detected. Verification code dispatched via Amazon SNS to your Primary Device screen.",
             "risk_score": risk_score,
             "temp_token": temp_token,
             "demo_mfa_code": otp
@@ -1015,7 +1015,7 @@ def login(payload: LoginSchema, request: Request):
             return {
                 "status": "MFA_REQUIRED",
                 "action": "DEVICE_APPROVAL_REQUIRED",
-                "message": "Secondary device detected. Verification code has been sent to your Primary Device screen.",
+                "message": "Secondary device detected. Verification code dispatched via Amazon SNS to your Primary Device screen.",
                 "temp_token": temp_token,
                 "device_tier": "SECONDARY"
             }
