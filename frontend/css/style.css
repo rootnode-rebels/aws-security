@@ -3005,3 +3005,53 @@ input:checked + .slider:before {
   background-color: #b91c1c !important;
   box-shadow: 0 0 10px rgba(220, 38, 38, 0.5);
 }
+
+/* ==========================================================================
+   LIGHT MODE OVERRIDES
+   ========================================================================== */
+[data-theme="light"] {
+  --bg-deep: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-surface-low: #f1f5f9;
+  --glass-bg-regular: rgba(255, 255, 255, 0.7);
+  --glass-bg-elevated: rgba(255, 255, 255, 0.85);
+  --glass-bg-dock: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.6) 100%), rgba(241, 245, 249, 0.8);
+  --glass-bg-modal: rgba(255, 255, 255, 0.95);
+  --glass-bg-input: rgba(255, 255, 255, 0.6);
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --text-dim: #94a3b8;
+  --border-subtle: rgba(0, 0, 0, 0.1);
+  --border-hover: rgba(0, 0, 0, 0.2);
+  --border-accent: rgba(0, 0, 0, 0.3);
+  --glass-border-subtle: 1px solid rgba(0, 0, 0, 0.1);
+  --glass-border-specular: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+/* Responsive Navbar Capsule Adjustments */
+@media (max-width: 1280px) {
+  .navbar {
+    padding: 0 0.5rem;
+    gap: 0.3rem;
+  }
+  .nav-links {
+    gap: 0;
+  }
+  .nav-btn {
+    padding: 0.25rem 0.4rem;
+    font-size: 0.72rem;
+  }
+  .nav-status {
+    gap: 0.2rem;
+  }
+  .nav-status .nav-label {
+    display: none;
+  }
+  .nav-status .nav-btn {
+    padding: 0.25rem 0.4rem;
+  }
+  .brand-title {
+    font-size: 0.85rem;
+  }
+}

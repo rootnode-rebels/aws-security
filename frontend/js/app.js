@@ -576,13 +576,45 @@ document.addEventListener("DOMContentLoaded", async () => {
 // UI ENHANCEMENTS (Theme, Mobile, Accessibility, Shortcuts)
 // ============================================================================
 
+// Initialize theme on load to prevent flickering
+(function initTheme() {
+  const savedTheme = localStorage.getItem('theme');
+  const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+  if (savedTheme === 'light' || (!savedTheme && prefersLight)) {
+    document.documentElement.setAttribute('data-theme', 'light');
+    document.body.setAttribute('data-theme', 'light');
+  }
+})();
+
+function updateThemeIcon() {
+  const icon = document.getElementById("theme-icon");
+  const label = document.getElementById("theme-label");
+  if (!icon || !label) return;
+  const isLight = document.body.getAttribute("data-theme") === "light";
+  if (isLight) {
+    icon.textContent = "🌙";
+    label.textContent = "Dark Mode";
+  } else {
+    icon.textContent = "☀️";
+    label.textContent = "Light Mode";
+  }
+}
+
 function toggleTheme() {
+  const html = document.documentElement;
   const body = document.body;
-  if (body.getAttribute("data-theme") === "light") {
+  const isLight = body.getAttribute("data-theme") === "light";
+  
+  if (isLight) {
     body.removeAttribute("data-theme");
+    html.removeAttribute("data-theme");
+    localStorage.setItem("theme", "dark");
   } else {
     body.setAttribute("data-theme", "light");
+    html.setAttribute("data-theme", "light");
+    localStorage.setItem("theme", "light");
   }
+  updateThemeIcon();
 }
 
 function toggleMobileMenu() {
@@ -654,6 +686,7 @@ window.addEventListener("scroll", () => {
 
 // Initialize features on load
 document.addEventListener("DOMContentLoaded", () => {
+  updateThemeIcon();
   setTimeout(() => {
     if (!localStorage.getItem("cookies_accepted")) {
       const banner = document.getElementById("cookie-banner");
