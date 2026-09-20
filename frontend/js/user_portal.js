@@ -910,7 +910,7 @@ async function loadUserSessions(force = false) {
               <div class="session-device-cell">
                 <span class="material-symbols-outlined session-icon ${isPrimarySession ? 'text-emerald' : 'text-amber'}">${devIcon}</span>
                 <div>
-                  <div class="session-device-name">${s.device || 'Web Browser'}&nbsp;<span class="copy-btn" onclick="copyToClipboard('${s.session_id}')" title="Copy Session ID">??</span></div>
+                  <div class="session-device-name">${s.device || 'Web Browser'}&nbsp;<span class="copy-btn" onclick="copyToClipboard('${s.session_id}', this)" title="Copy Session ID">📋</span></div>
                   <div class="session-device-badge-wrap">${deviceBadge}</div>
                 </div>
               </div>
@@ -1679,6 +1679,8 @@ async function fetchDispatchedNotifications() {
       cachedDispatchedNotifications = res.data.notifications || [];
       const totalEl = document.getElementById("sns-total-count");
       if (totalEl) totalEl.textContent = cachedDispatchedNotifications.length;
+      // Sync the nav button badge
+      if (typeof updateSNSNavBadge === "function") updateSNSNavBadge(cachedDispatchedNotifications.length);
 
       const badgeEl = document.getElementById("sns-status-badge");
       if (badgeEl) {
@@ -1857,6 +1859,9 @@ function handleIncomingDispatchedNotification(notif) {
   const totalEl = document.getElementById("sns-total-count");
   if (totalEl) totalEl.textContent = cachedDispatchedNotifications.length;
 
+  // Update the SNS nav button with unread count badge
+  updateSNSNavBadge(cachedDispatchedNotifications.length);
+
   showToast(`📧 [Amazon SNS Dispatch] ${notif.subject || 'New notification delivered to ' + notif.recipient_email}`, "info");
 
   const modal = document.getElementById("modal-dispatched-notifications");
@@ -1865,6 +1870,26 @@ function handleIncomingDispatchedNotification(notif) {
   }
 }
 window.handleIncomingDispatchedNotification = handleIncomingDispatchedNotification;
+
+// Updates the SNS Inbox nav button with unread notification count
+function updateSNSNavBadge(count) {
+  const snsBtn = document.getElementById("btn-nav-sns");
+  if (!snsBtn) return;
+  // Remove existing badge
+  const existingBadge = snsBtn.querySelector(".sns-unread-badge");
+  if (existingBadge) existingBadge.remove();
+  if (count > 0) {
+    const badge = document.createElement("span");
+    badge.className = "sns-unread-badge";
+    badge.textContent = count > 99 ? "99+" : count;
+    badge.style.cssText = "position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;min-width:18px;height:18px;font-size:0.65rem;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px;border:2px solid var(--bg-primary,#060d1e);pointer-events:none;";
+    snsBtn.style.position = "relative";
+    snsBtn.appendChild(badge);
+  } else {
+    snsBtn.style.position = "";
+  }
+}
+window.updateSNSNavBadge = updateSNSNavBadge;
 
 async function sendTestSNSNotification() {
   const targetEmail = (AppState && AppState.user && AppState.user.email) ? AppState.user.email : "demo@awssecurity.io";

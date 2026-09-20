@@ -104,18 +104,26 @@ async function getClientGeolocation() {
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          resolve({
-            lat: Number(pos.coords.latitude.toFixed(4)),
-            lon: Number(pos.coords.longitude.toFixed(4)),
-            city: "Current Location",
-            country: "User Region"
-          });
+          const lat = Number(pos.coords.latitude.toFixed(4));
+          const lon = Number(pos.coords.longitude.toFixed(4));
+          
+          fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`)
+            .then(res => res.json())
+            .then(data => {
+              const address = data.address || {};
+              const city = address.city || address.town || address.village || address.county || "Current Location";
+              const country = address.country || "User Region";
+              resolve({ lat, lon, city, country });
+            })
+            .catch(() => {
+              resolve({ lat, lon, city: "Current Location", country: "User Region" });
+            });
         },
         () => {
           // Default fallback (New York, US)
           resolve({ lat: 40.7128, lon: -74.0060, city: "New York", country: "US" });
         },
-        { timeout: 2000 }
+        { timeout: 5000 }
       );
     } else {
       resolve({ lat: 40.7128, lon: -74.0060, city: "New York", country: "US" });

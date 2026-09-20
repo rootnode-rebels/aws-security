@@ -160,16 +160,16 @@ class LiquidGlassBackground {
 
     // 3. Ambient Micro-refraction Floating Dust Motes (Neutral Silver Photons)
     this.caustics = [];
-    const nodeCount = Math.floor(Math.min(w, 1400) / 65);
+    const nodeCount = Math.floor(Math.min(w, 1400) / 15); // Heavily increased density for cyber network
     for (let i = 0; i < nodeCount; i++) {
       this.caustics.push({
         x: Math.random() * w,
         y: Math.random() * h,
-        vx: (Math.random() - 0.5) * 0.3,
-        vy: (Math.random() - 0.5) * 0.3,
-        radius: Math.random() * 1.8 + 0.8,
-        alpha: Math.random() * 0.35 + 0.15,
-        pulseSpeed: Math.random() * 0.018 + 0.008,
+        vx: (Math.random() - 0.5) * 0.4,
+        vy: (Math.random() - 0.5) * 0.4,
+        radius: Math.random() * 2.5 + 1.0,
+        alpha: Math.random() * 0.6 + 0.3,
+        pulseSpeed: Math.random() * 0.02 + 0.01,
         pulseOffset: Math.random() * Math.PI * 2
       });
     }
@@ -335,19 +335,35 @@ class LiquidGlassBackground {
       this.ctx.fillStyle = `rgba(255, 255, 255, ${currentAlpha})`;
       this.ctx.fill();
 
-      // Subtle delicate connecting filaments between nearby drifting photons
+      // Interactive Cyber Constellation Filaments between nodes
       for (let j = i + 1; j < this.caustics.length; j++) {
         const c2 = this.caustics[j];
         const cdx = c.x - c2.x;
         const cdy = c.y - c2.y;
         const cdistSq = cdx * cdx + cdy * cdy;
-        if (cdistSq < 6400) { // < 80px
-          const lineAlpha = (1 - Math.sqrt(cdistSq) / 80) * 0.10;
+        if (cdistSq < 15000) { // < ~122px
+          const lineAlpha = (1 - Math.sqrt(cdistSq) / 122) * 0.40;
           this.ctx.beginPath();
           this.ctx.moveTo(c.x, c.y);
           this.ctx.lineTo(c2.x, c2.y);
-          this.ctx.strokeStyle = `rgba(56, 189, 248, ${lineAlpha})`;
-          this.ctx.lineWidth = 0.7;
+          this.ctx.strokeStyle = `rgba(16, 185, 129, ${lineAlpha})`; // Emerald green cyber hue
+          this.ctx.lineWidth = 1.0;
+          this.ctx.stroke();
+        }
+      }
+
+      // Interactive mouse filaments
+      if (this.mouse.targetX !== -1000) {
+        const mdx = c.x - this.mouse.x;
+        const mdy = c.y - this.mouse.y;
+        const mdistSq = mdx * mdx + mdy * mdy;
+        if (mdistSq < 22500) { // < 150px
+          const mAlpha = (1 - Math.sqrt(mdistSq) / 150) * 0.60;
+          this.ctx.beginPath();
+          this.ctx.moveTo(c.x, c.y);
+          this.ctx.lineTo(this.mouse.x, this.mouse.y);
+          this.ctx.strokeStyle = `rgba(56, 189, 248, ${mAlpha})`; // Cyan interaction hue
+          this.ctx.lineWidth = 1.2;
           this.ctx.stroke();
         }
       }

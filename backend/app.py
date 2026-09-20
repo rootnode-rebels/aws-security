@@ -423,17 +423,26 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, A
 # -------------------------------------------------------------
 @app.post("/api/auth/register", status_code=201)
 def register(payload: RegisterSchema, request: Request):
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    
+    # 1. Rate Limit Check (Prevent script spam)
+    is_locked_ip, remaining_ip = rate_limiter.is_locked(client_ip)
+    if is_locked_ip:
+        raise HTTPException(status_code=429, detail=f"Too many attempts. Try again in {remaining_ip}s.")
+
     clean_email = sanitize_email(payload.email)
     clean_name = sanitize_string(payload.full_name)
 
     # Password validation
     is_valid, msg = validate_password_strength(payload.password)
     if not is_valid:
+        rate_limiter.record_failure(client_ip)
         raise HTTPException(status_code=400, detail=msg)
 
     # Check existence
     existing = db.users.find_one({"email": clean_email})
     if existing:
+        rate_limiter.record_failure(client_ip)
         # Anti-enumeration response per user rules: do not leak specific account presence
         raise HTTPException(status_code=400, detail="Unable to complete registration with provided details.")
 

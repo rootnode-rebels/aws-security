@@ -52,13 +52,17 @@ SERIOUS_NOTIFICATION_TYPES = {
     "BRUTE_FORCE_LOCKOUT",
     "ACCOUNT_STATUS_CHANGE",
     "PASSWORD_RESET_TOKEN",
+    "PASSWORD_CHANGED",
+    "ACCOUNT_DELETED",
     "SECONDARY_PASSWORD_ROTATED",
     "MFA_VERIFICATION_CODE",
     "EMAIL_VERIFICATION",
     "ACCOUNT_REGISTERED",
     "PRIMARY_DEVICE_ENROLLED",
     "SESSIONS_REVOKED",
-    "TEST_ALERT"
+    "SECONDARY_DEVICE_LOGIN",
+    "TEST_ALERT",
+    "TEST_SECURITY_ALERT"
 }
 
 
@@ -560,7 +564,6 @@ class NotificationDispatcher:
             metadata={"action": action, "client_ip": client_ip}
         )
 
-
     def send_welcome_registration(self, email: str, full_name: str, client_ip: str) -> Dict[str, Any]:
         """Dispatches security welcome notice when a user registers."""
         subject = "🎉 [AWS Security] Account Registered & Defense Policies Active"
@@ -654,12 +657,9 @@ class NotificationDispatcher:
             metadata={"client_ip": client_ip}
         )
 
-
-
-
     def send_email_verification(self, email: str, full_name: str, code: str) -> Dict[str, Any]:
         """Dispatches 6-digit email verification code via AWS SNS upon registration."""
-        subject = f"?? [AWS Security] Verify Your Email Address: {code}"
+        subject = f"✉️ [AWS Security] Verify Your Email Address: {code}"
         body_text = (
             f"Welcome to AWS Security Defense, {full_name}!\n\n"
             f"To complete your registration for {email}, please use the following verification code:\n\n"
@@ -668,13 +668,15 @@ class NotificationDispatcher:
         )
         body_html = f"""
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; background: #0b1329; color: #e2e8f0; border-radius: 12px; padding: 24px; border: 1px solid #1e293b;">
-          <h2 style="color: #38bdf8; margin-top: 0;">?? Verify Your Email Address</h2>
-          <p style="color: #94a3b8; font-size: 14px;">Welcome, <strong>{full_name}</strong>. Please verify your email.</p>
-          <div style="background: #0f172a; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;">
-            <div style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #38bdf8; font-family: monospace;">{code}</div>
-            <div style="font-size: 11px; color: #64748b; margin-top: 6px;">Single Use Code</div>
+          <h2 style="color: #38bdf8; margin-top: 0;">✉️ Verify Your Email Address</h2>
+          <p style="color: #94a3b8; font-size: 14px;">Welcome, <strong>{full_name}</strong>. Please verify your email address to activate your account.</p>
+          <div style="background: #0f172a; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0; border: 1px dashed rgba(56,189,248,0.3);">
+            <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #94a3b8; margin-bottom: 8px;">Your 6-Digit Verification Code</div>
+            <div style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #38bdf8; font-family: 'Courier New', monospace;">{code}</div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 8px;">Single Use &bull; Expires Shortly</div>
           </div>
-          <div style="font-size: 11px; color: #64748b;">Delivered via Amazon SNS Push / Email Gateway</div>
+          <p style="color: #94a3b8; font-size: 13px;">Enter this code on the verification screen to complete your registration.</p>
+          <div style="font-size: 11px; color: #64748b; margin-top: 20px;">Delivered via Amazon SNS Push / Email Gateway &bull; AWS Security Defense Platform</div>
         </div>
         """
         return self.dispatch(
@@ -685,7 +687,6 @@ class NotificationDispatcher:
             notification_type="EMAIL_VERIFICATION",
             metadata={"code": code}
         )
-# Global singleton dispatcher instance
+
+# Global singleton dispatcher instance
 notification_service = NotificationDispatcher()
-
-

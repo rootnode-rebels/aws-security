@@ -251,8 +251,7 @@ function showToast(message, type = "info") {
   container.appendChild(toast);
 
   setTimeout(() => {
-    toast.style.opacity = "0";
-    toast.style.transform = "translateX(50px)";
+    toast.classList.add("toast-out");
     setTimeout(() => toast.remove(), 300);
   }, 4000);
 }
@@ -294,13 +293,16 @@ function escapeHtml(str) {
 window.escapeHtml = escapeHtml;
 
 // Global Controller for Amazon SNS & Dispatched Security Mailbox Modal
-async function openDispatchedMailbox() {
-  openModal("modal-dispatched-notifications");
-  if (typeof window.fetchDispatchedNotifications === "function") {
-    await window.fetchDispatchedNotifications();
-  }
+// Note: Full implementation is in user_portal.js (openDispatchedMailbox / fetchDispatchedNotifications)
+// This stub ensures the function is always available globally, even before user_portal.js loads.
+if (typeof window.openDispatchedMailbox === "undefined") {
+  window.openDispatchedMailbox = function() {
+    openModal("modal-dispatched-notifications");
+    if (typeof window.fetchDispatchedNotifications === "function") {
+      window.fetchDispatchedNotifications();
+    }
+  };
 }
-window.openDispatchedMailbox = openDispatchedMailbox;
 
 // Central Password Modal Controller
 function switchPasswordMode(mode) {
@@ -799,7 +801,7 @@ function copyToClipboard(text, btnElement) {
   if (navigator.clipboard) {
     navigator.clipboard.writeText(text).then(() => {
       const originalText = btnElement.innerHTML;
-      btnElement.innerHTML = "? Copied!";
+      btnElement.innerHTML = "✅ Copied!";
       setTimeout(() => btnElement.innerHTML = originalText, 2000);
     }).catch(err => {
       console.error("Failed to copy:", err);
@@ -814,7 +816,7 @@ function copyToClipboard(text, btnElement) {
     try {
       document.execCommand("copy");
       const originalText = btnElement.innerHTML;
-      btnElement.innerHTML = "? Copied!";
+      btnElement.innerHTML = "✅ Copied!";
       setTimeout(() => btnElement.innerHTML = originalText, 2000);
     } catch (err) {
       showToast("Failed to copy to clipboard", "error");
