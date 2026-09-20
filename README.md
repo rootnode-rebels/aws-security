@@ -1,4 +1,4 @@
-﻿# 🛡️ Real-Time Account Hijacking Detection and Prevention System (AWSSecurity AI)
+# 🛡️ Real-Time Account Hijacking Detection and Prevention System (AWSSecurity AI)
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688.svg)](https://fastapi.tiangolo.com)
@@ -138,7 +138,9 @@ To prevent notification fatigue while guaranteeing immediate reaction to genuine
 
 ## 🔒 Security Hardening & Zero-Trust Features
 
-- **Primary Device Authority**: Users register their master workstation. Secondary devices cannot kill or alter primary sessions; only the primary device holds the remote **Kill Switch** to revoke secondary sessions.
+- **Live Dispatch Mailbox**: In-app secure message center for security events, featuring a real-time iOS-style unread badge counter driven by a low-latency Server-Sent Events (SSE) stream.
+- **Multi-Channel Alert Dispatch**: Critical account events—including Password Changes, Account Deletions, Secondary Device Logins, and Blocked Threats—are instantly broadcasted via Amazon SNS and SMTP/SES out-of-band channels.
+- **Primary Device Authority & Cross-Device Approval**: Users register their master workstation. Secondary devices cannot kill or alter primary sessions; only the primary device holds the remote **Kill Switch** to revoke secondary sessions. Additionally, any sign-in attempt from a new secondary device must be explicitly approved in real-time by the Primary Device via a live SSE push notification.
 - **Zero-Data-Leakage MFA**: Challenge endpoints return only an opaque challenge ID and device type; hardware canvas fingerprints and master device labels are strictly withheld from unauthenticated callers.
 - **Direct Instant Registration**: New accounts are activated immediately upon registration with instant local authentication, bypassing verification email delays for smooth onboarding.
 - **Password Visibility Control**: Built-in interactive eye icon (👁️) toggle on login and registration forms.

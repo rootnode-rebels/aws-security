@@ -36,6 +36,11 @@ class LocalCollection:
 
     def insert_one(self, doc: Dict[str, Any]) -> Dict[str, Any]:
         with self.parent.lock:
+            # DB-001: App-level duplicate prevention for users table in local fallback
+            if self.name == "users" and "email" in doc:
+                if self.find_one({"email": doc["email"]}):
+                    raise Exception(f"E11000 duplicate key error collection: users index: email_1 dup key: {{ email: '{doc['email']}' }}")
+
             docs = self.parent.get_collection_data(self.name)
             doc_copy = json.loads(json.dumps(doc))
             if "_id" not in doc_copy:
@@ -288,9 +293,22 @@ class DatabaseManager:
                     self.db = self.client.get_database("account_security_db")
                 self.use_mongo = True
                 print(f"[DB] Connected successfully to live MongoDB instance (DB: {self.db.name}).")
+                self._init_mongo_indexes()
             except Exception as e:
                 print(f"[DB] Could not connect to MongoDB ({e}). Falling back to local document store.")
                 self.use_mongo = False
+
+    def _init_mongo_indexes(self):
+        """Creates required MongoDB indexes (Unique and TTL) safely."""
+        try:
+            import pymongo
+            self.db.users.create_index("email", unique=True)
+            self.db.cloudwatch_logs.create_index("created_at", expireAfterSeconds=7*24*3600)
+            self.db.security_events.create_index("created_at", expireAfterSeconds=30*24*3600)
+            self.db.password_resets.create_index("created_at", expireAfterSeconds=3600)
+            print("[DB] MongoDB indexes (Unique & TTL) initialized.")
+        except Exception as e:
+            print(f"[DB] Warning: Could not initialize MongoDB indexes: {e}")
 
     def get_collection(self, collection_name: str):
         if self.use_mongo and self.db is not None:

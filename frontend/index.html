@@ -1306,7 +1306,7 @@
 
         <div class="form-group" style="text-align: center;">
           <label class="form-label" for="mfa-code-input" style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary);">Enter 6-Digit Code</label>
-          <input type="text" id="mfa-code-input" class="form-input" style="font-size: 1.6rem; letter-spacing: 0.35em; text-align: center; font-family: var(--font-mono); font-weight: 700; color: var(--accent-cyan); background: rgba(0,0,0,0.3); padding: 0.6rem;" maxlength="6" required placeholder="000000" autocomplete="one-time-code">
+          <input type="text" id="mfa-code-input" class="form-input" style="font-size: 1.6rem; letter-spacing: 0.35em; text-align: center; font-family: var(--font-mono); font-weight: 700; color: var(--accent-cyan); background: rgba(0,0,0,0.3); padding: 0.6rem;" maxlength="6" required placeholder="000000" autocomplete="one-time-code" oninput="if(this.value.length === 6) handleVerifyMFA(new Event('submit'))">
         </div>
 
         <div id="mfa-poll-status-indicator" style="font-size: 0.78rem; color: var(--accent-amber); text-align: center; margin-bottom: 1rem;">

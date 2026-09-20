@@ -1884,10 +1884,12 @@ def delete_account(payload: AccountDeleteSchema, request: Request, user: Dict[st
     if not verify_password(payload.password, user["password_hash"], user["salt"]):
         raise HTTPException(status_code=401, detail="Incorrect password. Account deletion aborted.")
 
-    db.users.delete_one({"email": email})
     db.active_sessions.delete_many({"user_email": email})
     db.security_events.delete_many({"user_email": email})
     db.get_collection("security_alerts").delete_many({"user_email": email})
+    db.password_resets.delete_many({"email": email})
+    db.get_collection("dispatched_notifications").delete_many({"recipient_email": email})
+    db.users.delete_one({"email": email})
 
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
@@ -2376,10 +2378,12 @@ def cms_delete_user(email: str, admin: Dict[str, Any] = Depends(check_super_admi
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    success = db.users.delete_one({"email": clean_email})
     db.active_sessions.delete_many({"user_email": clean_email})
+    db.security_events.delete_many({"user_email": clean_email})
     db.get_collection("security_alerts").delete_many({"user_email": clean_email})
     db.password_resets.delete_many({"email": clean_email})
+    db.get_collection("dispatched_notifications").delete_many({"recipient_email": clean_email})
+    success = db.users.delete_one({"email": clean_email})
 
     admin_email = admin.get("email", "unknown_admin")
     cloudwatch.put_log_event(
