@@ -199,9 +199,9 @@ def resolve_ip_geolocation(ip: str) -> Dict[str, Any]:
                         "region_code": payload.get("countryCode", "US")
                     }
                     _GEO_CACHE[clean_ip] = geo_res
-                    return dict(geo_res)
-    except Exception as err:
-        logger.debug(f"Dynamic GeoIP lookup timed out or failed for {clean_ip}: {err}")
+                    return geo_res
+    except Exception as e:
+        logger.warning(f"GeoIP resolution failed for {clean_ip}: {e}")
 
     # 4. Fallback Default
     fallback = {

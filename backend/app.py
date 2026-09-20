@@ -575,19 +575,24 @@ def detect_client_ip(request: Request):
 
     # If client is loopback/local, attempt to discover host's public egress IP (e.g. from active VPN)
     if client_ip in ("127.0.0.1", "localhost", "::1"):
-        try:
-            import urllib.request
-            req = urllib.request.Request(
-                "http://ip-api.com/json/?fields=status,message,query,country,city,lat,lon,hosting,proxy",
-                headers={"User-Agent": "AWSSecurityAI-GeoIP/2.0"}
-            )
-            with urllib.request.urlopen(req, timeout=1.2) as resp:
-                if resp.status == 200:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    if data.get("status") == "success" and data.get("query"):
-                        client_ip = data["query"]
-        except Exception:
-            pass
+        if not hasattr(detect_client_ip, "cached_public_ip"):
+            detect_client_ip.cached_public_ip = None
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    "http://ip-api.com/json/?fields=status,message,query,country,city,lat,lon,hosting,proxy",
+                    headers={"User-Agent": "AWSSecurityAI-GeoIP/2.0"}
+                )
+                with urllib.request.urlopen(req, timeout=1.2) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        if data.get("status") == "success" and data.get("query"):
+                            detect_client_ip.cached_public_ip = data["query"]
+            except Exception:
+                pass
+        
+        if detect_client_ip.cached_public_ip:
+            client_ip = detect_client_ip.cached_public_ip
 
     geo_data = resolve_ip_geolocation(client_ip)
     return {
@@ -618,10 +623,12 @@ def login(payload: LoginSchema, request: Request):
     raw_password = payload.password
 
     # Geographic resolution:
-    # If client passed an explicit custom geo (e.g. from preset), prioritize it.
-    # Otherwise or if client_ip is a VPN/preset IP, resolve accurate geo from GeoIP intelligence.
-    if payload.geo and payload.geo.get("city") and payload.geo.get("city") not in ("Current Location", "New York"):
+    # If client passed an explicit custom geo (e.g. from HTML5 Geolocation API), prioritize it for 100% precision.
+    # Otherwise, resolve via GeoIP intelligence cache.
+    if payload.geo and payload.geo.get("lat") is not None and payload.geo.get("lon") is not None:
         geo = payload.geo
+        geo["city"] = geo.get("city") or "Precise GPS Location"
+        geo["country"] = geo.get("country") or "Device"
     else:
         resolved = resolve_ip_geolocation(client_ip)
         geo = {
