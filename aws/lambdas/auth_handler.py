@@ -29,7 +29,25 @@ def lambda_handler(event, context):
     # Log to CloudWatch
     print(f"[CloudWatch /aws/lambda/AuthHandler] {http_method} {path} invoked with requestId: {context.aws_request_id if hasattr(context, 'aws_request_id') else 'local-req'}")
 
+    # Production runtime guard (ISSUE-08)
+    env_mode = os.getenv("DEPLOYMENT_MODE", "").upper()
+    if env_mode in ("PRODUCTION", "AWS_ECS_PROD", "CLOUD") and os.getenv("ENABLE_LAMBDA_MOCK_AUTH", "false").lower() != "true":
+        return {
+            "statusCode": 503,
+            "headers": headers,
+            "body": json.dumps({
+                "error": "Serverless Lambda mock authentication disabled in production. Routed to primary backend container API.",
+                "status": "SERVICE_UNAVAILABLE"
+            })
+        }
+
     if path.endswith("/register") and http_method == "POST":
+        if not body.get("email") or not body.get("password"):
+            return {
+                "statusCode": 400,
+                "headers": headers,
+                "body": json.dumps({"error": "Missing required registration parameters (email, password)."})
+            }
         return {
             "statusCode": 201,
             "headers": headers,
@@ -37,7 +55,16 @@ def lambda_handler(event, context):
         }
 
     if path.endswith("/login") and http_method == "POST":
-        # Invokes internal risk evaluation pipeline
+        email = body.get("email")
+        password = body.get("password")
+        if not email or not password:
+            return {
+                "statusCode": 400,
+                "headers": headers,
+                "body": json.dumps({"error": "Missing email or password credentials."})
+            }
+        # In mock evaluation mode, generate non-predictable session token
+        import secrets
         return {
             "statusCode": 200,
             "headers": headers,
@@ -47,7 +74,7 @@ def lambda_handler(event, context):
                 "decision": {
                     "action": "ALLOW",
                     "risk_score": 12.5,
-                    "session_token": "aws_sec_tok_" + str(int(time.time()))
+                    "session_token": f"aws_sec_tok_{secrets.token_urlsafe(24)}"
                 }
             })
         }

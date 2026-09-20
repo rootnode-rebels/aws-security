@@ -24,14 +24,14 @@ COPY run_standalone.py .
 
 # Environment settings for AWS production
 ENV DEPLOYMENT_MODE="AWS_ECS_PROD"
-ENV PORT=80
+ENV PORT=8000
 ENV HOST="0.0.0.0"
 
-EXPOSE 80
+EXPOSE 8000
 
 # Healthcheck for AWS Load Balancer
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:80/api/system/status || exit 1
+  CMD curl -f http://localhost:8000/api/system/status || exit 1
 
 # Launch the FastAPI app via the standalone runner using Uvicorn (configured inside)
 CMD ["python", "run_standalone.py"]

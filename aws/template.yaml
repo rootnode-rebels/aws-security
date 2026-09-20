@@ -121,13 +121,13 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: HighRiskHijackDetectionAlarm
-      AlarmDescription: Triggers when 3 or more high-risk hijacking attempts are detected within 5 minutes.
+      AlarmDescription: Triggers when 10 or more high-risk hijacking attempts are detected within 5 minutes.
       Namespace: AWS/AccountSecurity
       MetricName: HighRiskDetections
       Statistic: Sum
       Period: 300
       EvaluationPeriods: 1
-      Threshold: 3
+      Threshold: 10
       ComparisonOperator: GreaterThanOrEqualToThreshold
       AlarmActions:
         - !Ref SecurityAlertTopic

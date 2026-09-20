@@ -71,13 +71,17 @@ class NotificationDispatcher:
     def __init__(self):
         self._reload_config()
         self._boto3_sns_client = None
+        self._alert_cooldowns: Dict[str, float] = {}
 
     def _reload_config(self):
         """Refreshes configuration from environment and .env file."""
         load_env_file()
         self.sns_topic_arn = os.getenv("SECURITY_ALERT_TOPIC_ARN") or os.getenv("AWS_SNS_TOPIC_ARN")
         self.smtp_host = os.getenv("SMTP_HOST")
-        self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        try:
+            self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        except (ValueError, TypeError):
+            self.smtp_port = 587
         self.smtp_user = os.getenv("SMTP_USER")
         self.smtp_password = os.getenv("SMTP_PASSWORD")
         
@@ -234,24 +238,38 @@ class NotificationDispatcher:
         smtp_err = None
 
         if is_serious:
-            # 1. Attempt AWS SNS Publish for serious security incidents
-            sns_success = self._publish_sns(recipient_email, subject, body_text, notification_type)
+            cooldown_key = f"{recipient_email}:{notification_type}"
+            last_sent = self._alert_cooldowns.get(cooldown_key, 0)
+            now_ts = time.time()
+            cooldown_window = int(os.getenv("NOTIFICATION_COOLDOWN_SECONDS", "300"))
+            is_in_cooldown = (now_ts - last_sent < cooldown_window) and (os.getenv("DEPLOYMENT_MODE", "").upper() not in ("TEST", "DEVELOPMENT"))
 
-            # 2. Attempt SMTP / Gmail Email for serious security incidents
-            smtp_success, smtp_err = self._send_smtp(recipient_email, subject, body_text, body_html or body_text)
-            if smtp_err and self.smtp_host:
-                meta["delivery_warning"] = f"SMTP Delivery Error: {smtp_err}"
-
-            # Determine active channel representation
-            if sns_success and smtp_success:
-                channel = "Amazon SNS + Live Email"
-            elif sns_success:
-                channel = "Amazon SNS Topic"
-            elif smtp_success:
-                channel = "Gmail SMTP Live Delivery" if ("gmail" in (self.smtp_host or "").lower()) else "Live SMTP Delivery"
+            if is_in_cooldown:
+                meta["cooldown_applied"] = True
+                meta["cooldown_remaining_sec"] = int(cooldown_window - (now_ts - last_sent))
+                channel = "Main Device In-App Inbox (Cooldown Active)"
+                delivery_status = "DELIVERED"
+                logger.info(f"[NotificationDispatcher] Cooldown active for {cooldown_key}. Skipped duplicate external email/SNS dispatch.")
             else:
-                channel = "Amazon SNS / Email (Local Emulation)"
-            delivery_status = "DELIVERED" if (sns_success or smtp_success or not self.smtp_host) else "DELIVERY_FAILED"
+                self._alert_cooldowns[cooldown_key] = now_ts
+                # 1. Attempt AWS SNS Publish for serious security incidents
+                sns_success = self._publish_sns(recipient_email, subject, body_text, notification_type)
+
+                # 2. Attempt SMTP / Gmail Email for serious security incidents
+                smtp_success, smtp_err = self._send_smtp(recipient_email, subject, body_text, body_html or body_text)
+                if smtp_err and self.smtp_host:
+                    meta["delivery_warning"] = f"SMTP Delivery Error: {smtp_err}"
+
+                # Determine active channel representation
+                if sns_success and smtp_success:
+                    channel = "Amazon SNS + Live Email"
+                elif sns_success:
+                    channel = "Amazon SNS Topic"
+                elif smtp_success:
+                    channel = "Gmail SMTP Live Delivery" if ("gmail" in (self.smtp_host or "").lower()) else "Live SMTP Delivery"
+                else:
+                    channel = "Amazon SNS / Email (Local Emulation)"
+                delivery_status = "DELIVERED" if (sns_success or smtp_success or not self.smtp_host) else "DELIVERY_FAILED"
         else:
             # Routine / Low-Risk event: Sent strictly to Main Device In-App Inbox (No outbound email)
             channel = "Main Device In-App Inbox (Routine)"

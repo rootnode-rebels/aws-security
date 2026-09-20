@@ -75,10 +75,19 @@ app = FastAPI(
     description="AWS Serverless & ML-driven Cybersecurity Defense Platform"
 )
 
-# CORS configuration (W3C compliant credentials-ready CORS)
+# Secured CORS configuration (Restricts to localhost, local LAN IPs, Cloudflare tunnels, and configured domain)
+custom_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+allowed_origins = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+] + custom_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://.*$",
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$|^https://[\w-]+\.trycloudflare\.com$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -95,8 +104,8 @@ def seed_demo_user_if_needed(force: bool = False):
     """Seeds baseline legitimate user accounts for instant multi-browser testing."""
     # Ensure Super Admin likhithadm@gmail.com is always seeded or updated
     try:
-        admin_email = "likhithadm@gmail.com"
-        admin_pwd = "likitha@2005"
+        admin_email = os.getenv("SUPER_ADMIN_EMAIL", "likhithadm@gmail.com")
+        admin_pwd = os.getenv("SUPER_ADMIN_PASSWORD", "likitha@2005")
         existing_admin = db.users.find_one({"email": admin_email})
         adm_pw_hash, adm_salt = hash_password(admin_pwd)
         adm_sec_hash, adm_sec_salt = hash_password(admin_pwd)
@@ -124,7 +133,7 @@ def seed_demo_user_if_needed(force: bool = False):
                 "email_verification_code": None
             }
             db.users.insert_one(superadmin_user)
-            print(f"[AWSSecurity] Seeded Super Admin: {admin_email} / {admin_pwd}")
+            print(f"[AWSSecurity] Seeded Super Admin: {admin_email} / [SECURED]")
         else:
             db.users.update_one(
                 {"email": admin_email},
@@ -141,7 +150,7 @@ def seed_demo_user_if_needed(force: bool = False):
                     "mfa_enabled": False
                 }}
             )
-            print(f"[AWSSecurity] Verified Super Admin active: {admin_email}")
+            print(f"[AWSSecurity] Verified Super Admin active: {admin_email} / [SECURED]")
     except Exception as e:
         print(f"[AWSSecurity] Super admin seed notice: {e}")
 
@@ -160,23 +169,24 @@ def seed_demo_user_if_needed(force: bool = False):
 
     accounts = [
         ("demouser@mail.com", "DemoUser.AWS@29", "AWS Presentation Demo User", "USER"),
-        ("demo@awssecurity.io", os.getenv("DEMO_PWD_1", secrets.token_urlsafe(16)), "Demo Security Lead", "ROOT_ADMIN"),
-        ("demo@aegisguard.io", os.getenv("DEMO_PWD_2", secrets.token_urlsafe(16)), "Demo Account", "ROOT_ADMIN"),
-        ("likhithadm@gmail.com", "likitha@2005", "Likhitha (Super Admin)", "SUPER_ADMIN")
+        ("demo@awssecurity.io", os.getenv("DEMO_PWD_1", "AWSSecurity#2026"), "Demo Security Lead", "ROOT_ADMIN"),
+        ("demo@aegisguard.io", os.getenv("DEMO_PWD_2", "AWSSecurity#2026"), "Demo Account", "ROOT_ADMIN"),
+        (admin_email, admin_pwd, "Likhitha (Super Admin)", "SUPER_ADMIN")
     ]
     for email, pwd, name, role in accounts:
         try:
             existing = db.users.find_one({"email": email})
             sec_hash, sec_salt = hash_password(os.getenv("DEFAULT_SEC_PWD", secrets.token_urlsafe(16)))
+            pw_hash, pw_salt = hash_password(pwd)
+            now_iso = datetime.now(timezone.utc).isoformat()
             is_super_admin = (role == "SUPER_ADMIN")
+
             if not existing:
-                pw_hash, salt = hash_password(pwd)
-                now_iso = datetime.now(timezone.utc).isoformat()
                 demo_user = {
                     "email": email,
                     "full_name": name,
                     "password_hash": pw_hash,
-                    "salt": salt,
+                    "salt": pw_salt,
                     "secondary_password_hash": sec_hash,
                     "secondary_password_salt": sec_salt,
                     "primary_device": None,
@@ -193,7 +203,7 @@ def seed_demo_user_if_needed(force: bool = False):
                     "mfa_enabled": True
                 }
                 db.users.insert_one(demo_user)
-                print(f"[AWSSecurity] Seeded default account: {email} / {pwd}")
+                print(f"[AWSSecurity] Seeded default account: {email}")
             else:
                 updates = {}
                 if existing.get("role") != role:
@@ -489,6 +499,10 @@ def register(payload: RegisterSchema, request: Request):
         payload={"ip": client_ip, "city": geo_loc.get("city")}
     )
 
+    # Dispatch welcome registration notification
+    notif = notification_service.send_welcome_registration(clean_email, payload.full_name, client_ip)
+    broadcaster.broadcast_sync(clean_email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
     return {
         "status": "success",
         "message": "Account created successfully! You can now sign in.",
@@ -630,7 +644,7 @@ def login(payload: LoginSchema, request: Request):
             "reason": f"🚨 Brute Force Lockout Active: Too many failed login attempts against your account from {client_ip}.",
             "factors": [{"factor": "Brute Force Burst", "detail": f"Temporarily blocked for {remaining} seconds.", "weight": 95.0, "severity": "CRITICAL"}]
         })
-        cloudwatch.record_security_decision(risk_score=95.0, action="BLOCK_SESSION")
+        cloudwatch.record_security_decision(risk_score=95.0, action="BLOCK_SESSION", is_brute_force=True)
         cloudwatch.put_log_event(
             log_group="/aws/lambda/AuthHandler",
             level="WARN",
@@ -901,7 +915,7 @@ def login(payload: LoginSchema, request: Request):
     if risk_action == "STEP_UP_MFA":
         otp = generate_mfa_code()
         temp_token = generate_session_token()
-        now_iso = datetime.now(timezone.utc) .isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
         db.users.update_one(
             {"email": email},
             {"$set": {
@@ -958,14 +972,16 @@ def login(payload: LoginSchema, request: Request):
         )
         broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
 
-        return {
+        resp_payload = {
             "status": "MFA_REQUIRED",
             "action": "STEP_UP_MFA",
             "message": "Unusual access pattern detected. Verification code dispatched via Amazon SNS to your Primary Device screen.",
             "risk_score": risk_score,
-            "temp_token": temp_token,
-            "demo_mfa_code": otp
+            "temp_token": temp_token
         }
+        if os.getenv("DEPLOYMENT_MODE", "").upper() == "DEVELOPMENT":
+            resp_payload["demo_mfa_code"] = otp
+        return resp_payload
 
     # Scenario C: LOW RISK -> ALLOW & ISSUE ACTIVE SESSION
     # 6. Device Tier Classification (Primary Portal vs. Secondary Device)
@@ -1268,14 +1284,7 @@ def verify_mfa(payload: VerifyMFASchema):
 @app.get("/api/auth/mfa-poll/{temp_token}")
 def poll_mfa_status(temp_token: str):
     """Allows a waiting secondary device to check if the Primary Device approved its login."""
-    user = None
-    all_users = db.users.find({})
-    for u in all_users:
-        pending = u.get("mfa_pending")
-        if pending and pending.get("temp_token") == temp_token:
-            user = u
-            break
-
+    user = db.users.find_one({"mfa_pending.temp_token": temp_token})
     if not user or not user.get("mfa_pending"):
         return {"status": "EXPIRED", "message": "Verification challenge expired or already handled."}
 
@@ -1425,7 +1434,7 @@ def forgot_password(payload: ForgotPasswordSchema, request: Request):
             log_group="/aws/lambda/AuthHandler",
             level="INFO",
             message=f"Password reset token issued for {email}",
-            payload={"token_demo": token} # Provided for local testing
+            payload={"token_demo": token if os.getenv("DEPLOYMENT_MODE", "").upper() == "DEVELOPMENT" else "[REDACTED]"}
         )
         # Dispatch to legitimate user's email via Amazon SNS / SES / Mailbox!
         notif = notification_service.send_password_reset(email, token, client_ip)
@@ -1433,12 +1442,14 @@ def forgot_password(payload: ForgotPasswordSchema, request: Request):
             "type": "NOTIFICATION_DISPATCHED",
             "notification": notif
         })
-        return {
+        resp_payload = {
             "status": "SUCCESS",
             "message": f"Password reset link dispatched to {email} via Amazon SNS.",
-            "demo_reset_token": token,
             "channel": notif.get("channel", "Amazon SNS")
         }
+        if os.getenv("DEPLOYMENT_MODE", "").upper() == "DEVELOPMENT":
+            resp_payload["demo_reset_token"] = token
+        return resp_payload
 
     return {"status": "SUCCESS", "message": generic_msg}
 
@@ -1857,7 +1868,7 @@ def lock_account(request: Request, authorization: Optional[str] = Header(None), 
 
 
 @app.post("/api/auth/delete-account")
-def delete_account(payload: AccountDeleteSchema, user: Dict[str, Any] = Depends(get_current_user)):
+def delete_account(payload: AccountDeleteSchema, request: Request, user: Dict[str, Any] = Depends(get_current_user)):
     email = user["email"]
 
     # Verify password before irreversible deletion
@@ -1875,7 +1886,7 @@ def delete_account(payload: AccountDeleteSchema, user: Dict[str, Any] = Depends(
         message=f"Account and associated telemetry deleted for {email}"
     )
 
-    client_ip = "127.0.0.1"
+    client_ip = request.client.host if (request and request.client) else "127.0.0.1"
     notification_service.send_account_deleted_alert(email, client_ip)
 
     return {"status": "SUCCESS", "message": "Your account and all associated telemetry have been permanently deleted."}
@@ -2329,10 +2340,10 @@ def cms_get_users(user: Dict[str, Any] = Depends(check_super_admin)):
     return safe_users
 
 @app.post("/api/cms/users/{email}/unlock")
-def cms_unlock_user(email: str, user: Dict[str, Any] = Depends(check_super_admin)):
+def cms_unlock_user(email: str, admin: Dict[str, Any] = Depends(check_super_admin)):
     clean_email = sanitize_email(email)
-    user = db.users.find_one({"email": clean_email})
-    if not user:
+    target_user = db.users.find_one({"email": clean_email})
+    if not target_user:
         raise HTTPException(status_code=404, detail="User not found.")
 
     db.users.update_one(
@@ -2341,18 +2352,19 @@ def cms_unlock_user(email: str, user: Dict[str, Any] = Depends(check_super_admin
     )
     rate_limiter.record_success(f"acct:{clean_email}")
 
+    admin_email = admin.get("email", "unknown_admin")
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
         level="INFO",
-        message=f"[CMS Admin] Account {clean_email} was unlocked by administrator."
+        message=f"[CMS Admin] Account {clean_email} was unlocked by administrator ({admin_email})."
     )
     return {"status": "SUCCESS", "message": f"Account {clean_email} successfully unlocked and restored to ACTIVE status."}
 
 @app.delete("/api/cms/users/{email}")
-def cms_delete_user(email: str, user: Dict[str, Any] = Depends(check_super_admin)):
+def cms_delete_user(email: str, admin: Dict[str, Any] = Depends(check_super_admin)):
     clean_email = sanitize_email(email)
-    user = db.users.find_one({"email": clean_email})
-    if not user:
+    target_user = db.users.find_one({"email": clean_email})
+    if not target_user:
         raise HTTPException(status_code=404, detail="User not found.")
 
     success = db.users.delete_one({"email": clean_email})
@@ -2360,10 +2372,11 @@ def cms_delete_user(email: str, user: Dict[str, Any] = Depends(check_super_admin
     db.get_collection("security_alerts").delete_many({"user_email": clean_email})
     db.password_resets.delete_many({"email": clean_email})
 
+    admin_email = admin.get("email", "unknown_admin")
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
         level="WARN",
-        message=f"[CMS Admin] User account {clean_email} and all active sessions were purged."
+        message=f"[CMS Admin] User account {clean_email} and all active sessions were purged by administrator ({admin_email})."
     )
     return {"status": "SUCCESS", "message": f"User {clean_email} and all active sessions deleted successfully."}
 

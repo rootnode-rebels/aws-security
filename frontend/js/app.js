@@ -58,6 +58,13 @@ function playSecurityAlertSound() {
   }
 }
 
+function toggleMobileMenu() {
+  const nav = document.querySelector(".nav-links");
+  if (nav) {
+    nav.classList.toggle("mobile-open");
+  }
+}
+
 // Global Alert Banner Controller
 function showSecurityAlertBanner(alert) {
   const banner = document.getElementById("emergency-alert-banner");

@@ -14,6 +14,7 @@ class CloudWatchService:
         self.metrics = {
             "Invocations": 0,
             "HighRiskDetections": 0,
+            "BruteForceBlocks": 0,
             "BlockedHijacks": 0,
             "StepUpMFAChallenges": 0,
             "NormalLogins": 0,
@@ -26,7 +27,7 @@ class CloudWatchService:
             "HighRiskRateAlarm": {
                 "name": "HighRiskRateAlarm",
                 "metric": "HighRiskDetections",
-                "threshold": 3,
+                "threshold": 10,
                 "period_minutes": 5,
                 "state": "OK", # "OK" or "ALARM"
                 "reason": "Threshold not breached.",
@@ -34,7 +35,7 @@ class CloudWatchService:
             },
             "BruteForceBurstAlarm": {
                 "name": "BruteForceBurstAlarm",
-                "metric": "BlockedHijacks",
+                "metric": "BruteForceBlocks",
                 "threshold": 4,
                 "period_minutes": 5,
                 "state": "OK",
@@ -48,7 +49,7 @@ class CloudWatchService:
             self.metrics["Invocations"] += 1
             self.metrics["TotalExecutionLatencyMs"] += latency_ms
 
-    def record_security_decision(self, risk_score: float, action: str):
+    def record_security_decision(self, risk_score: float, action: str, is_brute_force: bool = False):
         now = time.time()
         with self.lock:
             self.metrics["RiskEvaluations"] += 1
@@ -56,7 +57,10 @@ class CloudWatchService:
 
             if action == "BLOCK_SESSION":
                 self.metrics["BlockedHijacks"] += 1
-                self.metrics["HighRiskDetections"] += 1
+                if is_brute_force:
+                    self.metrics["BruteForceBlocks"] += 1
+                else:
+                    self.metrics["HighRiskDetections"] += 1
             elif action == "STEP_UP_MFA":
                 self.metrics["StepUpMFAChallenges"] += 1
             else:
@@ -66,7 +70,8 @@ class CloudWatchService:
             self.metric_timeseries.append({
                 "timestamp": now,
                 "risk_score": risk_score,
-                "action": action
+                "action": action,
+                "is_brute_force": is_brute_force
             })
 
             # Trim history to last 500 events
@@ -80,25 +85,25 @@ class CloudWatchService:
         five_mins_ago = now - 300
         recent = [p for p in self.metric_timeseries if p["timestamp"] >= five_mins_ago]
 
-        high_risk_count = sum(1 for p in recent if p["action"] == "BLOCK_SESSION")
+        high_risk_count = sum(1 for p in recent if p["action"] == "BLOCK_SESSION" and not p.get("is_brute_force"))
         alarm_high = self.alarms["HighRiskRateAlarm"]
         if high_risk_count >= alarm_high["threshold"]:
             alarm_high["state"] = "ALARM"
-            alarm_high["reason"] = f"CRITICAL: {high_risk_count} high-risk attacks detected in last 5 minutes (threshold >= {alarm_high['threshold']})."
+            alarm_high["reason"] = f"CRITICAL: {high_risk_count} ML-risk hijack attempts in last 5 min (threshold >= {alarm_high['threshold']})."
             alarm_high["updated_at"] = datetime.now(timezone.utc).isoformat()
         else:
             alarm_high["state"] = "OK"
             alarm_high["reason"] = f"Within normal bounds ({high_risk_count}/{alarm_high['threshold']} in 5 min)."
 
-        blocked_count = sum(1 for p in recent if p["action"] == "BLOCK_SESSION")
+        brute_count = sum(1 for p in recent if p.get("is_brute_force"))
         alarm_brute = self.alarms["BruteForceBurstAlarm"]
-        if blocked_count >= alarm_brute["threshold"]:
+        if brute_count >= alarm_brute["threshold"]:
             alarm_brute["state"] = "ALARM"
-            alarm_brute["reason"] = f"ALARM: {blocked_count} sessions blocked automatically in last 5 minutes."
+            alarm_brute["reason"] = f"ALARM: {brute_count} brute-force rate-limit lockouts in last 5 min (threshold >= {alarm_brute['threshold']})."
             alarm_brute["updated_at"] = datetime.now(timezone.utc).isoformat()
         else:
             alarm_brute["state"] = "OK"
-            alarm_brute["reason"] = f"Normal operation ({blocked_count}/{alarm_brute['threshold']} blocked in 5 min)."
+            alarm_brute["reason"] = f"Normal operation ({brute_count}/{alarm_brute['threshold']} in 5 min)."
 
     def put_log_event(self, log_group: str, level: str, message: str, payload: Optional[Dict[str, Any]] = None):
         """Dispatches structured log entry to the CloudWatch log stream."""

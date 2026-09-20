@@ -11,13 +11,14 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding='utf-8')
 
 from fastapi.testclient import TestClient
-from backend.app import app
+from backend.app import app, seed_demo_user_if_needed
 from database.db_manager import db
 from backend.security.rate_limiter import rate_limiter
 
 client = TestClient(app)
 
 def run_two_browser_verification():
+    os.environ["DEPLOYMENT_MODE"] = "DEVELOPMENT"
     print("\n=======================================================")
     print("[TEST] RUNNING 2-BROWSER REAL-TIME ALERT VERIFICATION TEST")
     print("=======================================================")
@@ -25,8 +26,10 @@ def run_two_browser_verification():
     email = "demo@awssecurity.io"
     password = "AWSSecurity#2026"
 
-    # Reset account state to ACTIVE and clear limiter
+    # Reset account state to ACTIVE, reseed credentials, and clear limiter
     rate_limiter.clear_all()
+    db.users.delete_one({"email": email})
+    seed_demo_user_if_needed(force=True)
     db.users.update_one({"email": email}, {"$set": {"status": "ACTIVE", "mfa_pending": None}})
     db.get_collection("security_alerts").delete_many({"user_email": email})
     db.active_sessions.delete_many({"user_email": email})
@@ -49,9 +52,12 @@ def run_two_browser_verification():
     res_data = login_resp.json()
     print(f"  -> Login status: {res_data.get('status')}, Risk Score: {res_data.get('risk_score')}")
     if res_data.get("status") == "MFA_REQUIRED":
+        pending_user = db.users.find_one({"email": email}) or {}
+        code = res_data.get("demo_mfa_code") or pending_user.get("mfa_pending", {}).get("code")
         mfa_resp = client.post("/api/auth/verify-mfa", json={
             "email": email,
-            "code": res_data["demo_mfa_code"]
+            "temp_token": res_data.get("temp_token"),
+            "mfa_code": code
         })
         assert mfa_resp.status_code == 200
         token1 = mfa_resp.json()["token"]

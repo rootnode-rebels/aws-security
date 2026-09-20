@@ -23,6 +23,7 @@ from backend.security.notification_service import notification_service
 class TestNotificationService(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        os.environ["DEPLOYMENT_MODE"] = "DEVELOPMENT"
         cls.client = TestClient(app)
         cls.test_email = "sns_tester@awssecurity.io"
         cls.test_pwd = "StrongSecure#2026"
@@ -61,7 +62,7 @@ class TestNotificationService(unittest.TestCase):
         self.assertIn("channel", data)
 
         # Verify dispatched_notifications has the record
-        records = db.get_collection("dispatched_notifications").find({"recipient_email": self.test_email})
+        records = list(db.get_collection("dispatched_notifications").find({"recipient_email": self.test_email}))
         self.assertGreaterEqual(len(records), 1)
 
         reset_notif = next((r for r in records if r.get("notification_type") == "PASSWORD_RESET_TOKEN"), None)
@@ -113,10 +114,10 @@ class TestNotificationService(unittest.TestCase):
         self.assertEqual(chg_res.status_code, 200)
 
         # Verify dispatched record
-        records = db.get_collection("dispatched_notifications").find({
+        records = list(db.get_collection("dispatched_notifications").find({
             "recipient_email": self.test_email,
             "notification_type": "PASSWORD_CHANGED"
-        })
+        }))
         self.assertGreaterEqual(len(records), 1)
         self.assertIn("Password Updated", records[0]["subject"])
 
@@ -132,19 +133,19 @@ class TestNotificationService(unittest.TestCase):
         lock_res = self.client.post("/api/auth/lock-account", headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(lock_res.status_code, 200)
 
-        records = db.get_collection("dispatched_notifications").find({
+        records = list(db.get_collection("dispatched_notifications").find({
             "recipient_email": self.test_email,
             "notification_type": "ACCOUNT_STATUS_CHANGE"
-        })
+        }))
         self.assertGreaterEqual(len(records), 1)
         self.assertIn("Freeze", records[0]["subject"])
 
     def test_registration_dispatches_welcome_notification(self):
         """Verify registration dispatches an ACCOUNT_REGISTERED notification."""
-        records = db.get_collection("dispatched_notifications").find({
+        records = list(db.get_collection("dispatched_notifications").find({
             "recipient_email": self.test_email,
             "notification_type": "ACCOUNT_REGISTERED"
-        })
+        }))
         self.assertGreaterEqual(len(records), 1)
         self.assertIn("Registered", records[0]["subject"])
 
@@ -163,10 +164,10 @@ class TestNotificationService(unittest.TestCase):
         })
         self.assertEqual(res.status_code, 200)
 
-        records = db.get_collection("dispatched_notifications").find({
+        records = list(db.get_collection("dispatched_notifications").find({
             "recipient_email": self.test_email,
             "notification_type": "SECONDARY_PASSWORD_ROTATED"
-        })
+        }))
         self.assertGreaterEqual(len(records), 1)
         self.assertIn("Secondary Password Updated", records[0]["subject"])
 
@@ -178,10 +179,10 @@ class TestNotificationService(unittest.TestCase):
         })
         self.assertEqual(sim_res.status_code, 200)
 
-        records = db.get_collection("dispatched_notifications").find({
+        records = list(db.get_collection("dispatched_notifications").find({
             "recipient_email": self.test_email,
             "notification_type": "THREAT_BLOCKED"
-        })
+        }))
         self.assertGreaterEqual(len(records), 1)
         self.assertIn("CRITICAL ALERT", records[0]["subject"])
 
