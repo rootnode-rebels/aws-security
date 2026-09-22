@@ -23,6 +23,7 @@ async function cmsLoadData() {
   }
   await cmsFetchStats();
   await cmsFetchUsers();
+  await cmsFetchSessions();
 }
 window.cmsLoadData = cmsLoadData;
 
@@ -247,5 +248,211 @@ async function cmsToggleMaintenance(forceEnable = null) {
   }
 }
 window.cmsToggleMaintenance = cmsToggleMaintenance;
+
+/**
+ * Fetch and populate all active logins across the platform for Super Admin
+ */
+let cmsSessionsCache = [];
+
+async function cmsFetchSessions() {
+  const tbody = document.getElementById('cms-sessions-tbody');
+  if (!tbody) return;
+  if (typeof renderSkeletonRows === "function") renderSkeletonRows("cms-sessions-tbody", 4);
+  else tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Loading active logins...</td></tr>';
+
+  try {
+    const response = await apiFetch('/api/cms/sessions');
+    if (!response.ok) throw new Error(response.data?.detail || 'Failed to fetch sessions');
+
+    const sessions = response.data;
+    cmsSessionsCache = Array.isArray(sessions) ? sessions : [];
+
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+      if (typeof renderEmptyState === "function") renderEmptyState("cms-sessions-tbody", "No active sessions found.");
+      else tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No active logins found.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = '';
+
+    sessions.forEach(sess => {
+      const tr = document.createElement('tr');
+
+      const isPrimary = boolOrTrue(sess.is_primary_device) || sess.device_tier === 'PRIMARY';
+      const tierBadge = isPrimary
+        ? '<span class="badge badge-low font-mono" style="color: var(--accent-emerald); border-color: rgba(16, 185, 129, 0.4);"><span class="pulse-dot pulse-dot-emerald" style="display:inline-block; margin-right:4px;"></span>PRIMARY PORTAL</span>'
+        : '<span class="badge badge-medium font-mono" style="color: var(--accent-cyan); border-color: rgba(6, 182, 212, 0.4);">SECONDARY</span>';
+
+      const statusBadge = (sess.status === 'ACTIVE' || !sess.status)
+        ? '<span class="badge badge-low font-mono">ACTIVE</span>'
+        : `<span class="badge badge-critical font-mono">${sess.status}</span>`;
+
+      const loginTime = sess.created_at ? new Date(sess.created_at).toLocaleString() : 'Recent';
+      const city = sess.geo?.city || 'Local Network';
+      const country = sess.geo?.country || 'US';
+      const locationText = `${city}, ${country}`;
+
+      tr.innerHTML = `
+        <td>
+          <div style="font-weight: 600; color: #fff;">${escapeHtml(sess.user_name || 'User')}</div>
+          <code class="font-mono text-cyan" style="font-size: 0.75rem;">${escapeHtml(sess.user_email || '')}</code>
+        </td>
+        <td>
+          <div style="font-weight: 500; font-size: 0.85rem; color: #e2e8f0;">${escapeHtml(sess.device || 'Standard Device')}</div>
+          <div style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);">${escapeHtml(sess.session_id || '')}</div>
+        </td>
+        <td>
+          <div style="display: flex; flex-direction: column; gap: 3px; align-items: flex-start;">
+            ${tierBadge}
+            ${statusBadge}
+          </div>
+        </td>
+        <td>
+          <div style="font-size: 0.85rem; color: #fff; font-family: var(--font-mono);">${escapeHtml(sess.ip_address || '127.0.0.1')}</div>
+          <div style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(locationText)}</div>
+        </td>
+        <td style="font-size: 0.8rem; color: var(--text-muted);">${escapeHtml(loginTime)}</td>
+        <td>
+          <div style="display: flex; gap: 0.4rem; align-items: center;">
+            <button class="btn btn-secondary btn-sm" onclick="cmsOpenEditSession('${sess.session_id}')" title="Edit session label or authority tier">
+              Edit
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="cmsTerminateSession('${sess.session_id}')" title="Terminate and revoke this session immediately">
+              Terminate
+            </button>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    console.error('[CMS] Error fetching sessions:', err);
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--accent-crimson);">Error loading sessions: ${err.message}</td></tr>`;
+  }
+}
+window.cmsFetchSessions = cmsFetchSessions;
+
+/**
+ * Terminate a login session by ID (Super Admin privilege)
+ */
+async function cmsTerminateSession(sessionId) {
+  if (!confirm(`Are you sure you want to revoke and terminate session ${sessionId}? This will immediately sign the device out.`)) {
+    return;
+  }
+
+  try {
+    const response = await apiFetch(`/api/cms/sessions/${encodeURIComponent(sessionId)}/terminate`, {
+      method: 'POST'
+    });
+
+    if (!response.ok) {
+      throw new Error(response.data?.detail || 'Failed to terminate session');
+    }
+
+    if (typeof showToast === 'function') {
+      showToast(`Session ${sessionId} terminated successfully. Device signed out.`, 'success');
+    }
+
+    await cmsFetchStats();
+    await cmsFetchSessions();
+  } catch (err) {
+    if (typeof showToast === 'function') {
+      showToast(`Error terminating session: ${err.message}`, 'error');
+    } else {
+      alert(`Error terminating session: ${err.message}`);
+    }
+    console.error('[CMS] Error terminating session:', err);
+  }
+}
+window.cmsTerminateSession = cmsTerminateSession;
+
+/**
+ * Open the Edit Session Modal for a given session ID
+ */
+function cmsOpenEditSession(sessionId) {
+  const session = cmsSessionsCache.find(s => s.session_id === sessionId);
+  if (!session) {
+    if (typeof showToast === 'function') showToast("Session data not found.", "error");
+    return;
+  }
+
+  const idInput = document.getElementById('cms-edit-session-id');
+  const emailInput = document.getElementById('cms-edit-user-email');
+  const labelInput = document.getElementById('cms-edit-device-label');
+  const tierSelect = document.getElementById('cms-edit-device-tier');
+  const statusSelect = document.getElementById('cms-edit-session-status');
+
+  if (idInput) idInput.value = session.session_id || '';
+  if (emailInput) emailInput.value = `${session.user_name || ''} (${session.user_email || ''})`;
+  if (labelInput) labelInput.value = session.device || '';
+  if (tierSelect) tierSelect.value = (session.device_tier || (session.is_primary_device ? 'PRIMARY' : 'SECONDARY'));
+  if (statusSelect) statusSelect.value = session.status || 'ACTIVE';
+
+  if (typeof openModal === 'function') {
+    openModal('modal-cms-edit-session');
+  }
+}
+window.cmsOpenEditSession = cmsOpenEditSession;
+
+/**
+ * Save modifications made to a login session
+ */
+async function cmsSaveEditSession(e) {
+  if (e && e.preventDefault) e.preventDefault();
+
+  const sessionId = document.getElementById('cms-edit-session-id')?.value;
+  const deviceLabel = document.getElementById('cms-edit-device-label')?.value.trim();
+  const deviceTier = document.getElementById('cms-edit-device-tier')?.value;
+  const status = document.getElementById('cms-edit-session-status')?.value;
+
+  if (!sessionId) return;
+
+  try {
+    const response = await apiFetch(`/api/cms/sessions/${encodeURIComponent(sessionId)}/edit`, {
+      method: 'POST',
+      body: JSON.stringify({
+        device: deviceLabel,
+        device_tier: deviceTier,
+        status: status
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(response.data?.detail || 'Failed to update session');
+    }
+
+    if (typeof closeModal === 'function') {
+      closeModal('modal-cms-edit-session');
+    }
+
+    if (typeof showToast === 'function') {
+      showToast("Login session successfully updated!", "success");
+    }
+
+    await cmsFetchSessions();
+  } catch (err) {
+    if (typeof showToast === 'function') {
+      showToast(`Error updating session: ${err.message}`, 'error');
+    } else {
+      alert(`Error updating session: ${err.message}`);
+    }
+    console.error('[CMS] Error updating session:', err);
+  }
+}
+window.cmsSaveEditSession = cmsSaveEditSession;
+
+function boolOrTrue(val) {
+  return val === true || val === "true" || val === 1;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
 

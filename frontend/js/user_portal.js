@@ -1346,7 +1346,7 @@ async function loadUserAlerts(force = false) {
             actionsHtml = `
               <button class="btn btn-primary btn-sm" onclick="executeApproveSecondary(true, '${a.temp_token || 'LATEST'}')">
                 <span class="material-symbols-outlined" style="font-size: 1rem;">check_circle</span>
-                <span>Allow Sign-In (1-Click)</span>
+                <span>Allow Manually (1-Click Approval)</span>
               </button>
               <button class="btn btn-danger btn-sm" onclick="executeApproveSecondary(false, '${a.temp_token || 'LATEST'}')">
                 <span class="material-symbols-outlined" style="font-size: 0.9rem;">cancel</span>

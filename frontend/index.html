@@ -1266,6 +1266,38 @@
             </tbody>
           </table>
         </div>
+      <!-- CMS Active Logins & Device Sessions Directory -->
+      <div class="cyber-card" style="margin-top: 1.5rem;">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="material-symbols-outlined text-cyan" style="font-size: 1.3rem;">devices</span>
+            <span>All Active Logins & Device Sessions (Super Admin Governance)</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="cmsFetchSessions()" title="Refresh active logins">
+            <span class="material-symbols-outlined" style="font-size: 1rem;">refresh</span>
+            <span>Refresh</span>
+          </button>
+        </div>
+        <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
+          Super Admin master session registry: Real-time oversight across all platform accounts. Edit device labels, reassign authority tiers, or instantly revoke suspicious logins.
+        </p>
+        <div class="cyber-table-wrapper">
+          <table class="cyber-table" aria-label="CMS active logins directory">
+            <thead>
+              <tr>
+                <th>User Account</th>
+                <th>Device & Client</th>
+                <th>Authority Tier</th>
+                <th>IP & Geolocation</th>
+                <th>Logged In At</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="cms-sessions-tbody">
+              <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Loading active logins...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -1376,13 +1408,63 @@
       <div style="display: flex; gap: 0.6rem;">
         <button type="button" class="btn btn-success" style="flex: 1; padding: 0.65rem 1rem;" onclick="executeApproveSecondary(true)">
           <span class="material-symbols-outlined" style="font-size: 1.1rem;">check_circle</span>
-          <span>Allow Sign-In (1-Click)</span>
+          <span>Allow Manually (1-Click Approval)</span>
         </button>
         <button type="button" class="btn btn-danger" style="flex: 1;" onclick="executeApproveSecondary(false)">
           <span class="material-symbols-outlined" style="font-size: 1rem;">cancel</span>
           <span>Deny & Block</span>
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- Modal: Super Admin Edit Session -->
+  <div id="modal-cms-edit-session" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="cms-edit-session-title">
+    <div class="cyber-modal-box">
+      <button class="modal-close-btn" onclick="closeModal('modal-cms-edit-session')" aria-label="Close dialog">✕</button>
+      <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
+        <span class="material-symbols-outlined text-cyan" style="font-size: 1.6rem;">tune</span>
+        <h2 id="cms-edit-session-title" style="color: #fff; font-size: 1.2rem; margin: 0;">
+          Edit Login & Device Session
+        </h2>
+      </div>
+      <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 1rem;">
+        Super Administrator: Modify device authority, label, or status for this session.
+      </p>
+
+      <form id="cms-edit-session-form" onsubmit="cmsSaveEditSession(event)">
+        <input type="hidden" id="cms-edit-session-id">
+        <div class="form-group" style="margin-bottom: 0.85rem;">
+          <label for="cms-edit-user-email" class="form-label" style="font-size: 0.75rem;">User Account</label>
+          <input type="text" id="cms-edit-user-email" class="form-input font-mono" readonly style="opacity: 0.8;">
+        </div>
+
+        <div class="form-group" style="margin-bottom: 0.85rem;">
+          <label for="cms-edit-device-label" class="form-label" style="font-size: 0.75rem;">Device Label</label>
+          <input type="text" id="cms-edit-device-label" class="form-input" required>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 0.85rem;">
+          <label for="cms-edit-device-tier" class="form-label" style="font-size: 0.75rem;">Authority Tier</label>
+          <select id="cms-edit-device-tier" class="form-input">
+            <option value="PRIMARY">PRIMARY (Perpetual Master Device)</option>
+            <option value="SECONDARY">SECONDARY (Challenged & Restricted)</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1.2rem;">
+          <label for="cms-edit-session-status" class="form-label" style="font-size: 0.75rem;">Session Status</label>
+          <select id="cms-edit-session-status" class="form-input">
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="SUSPENDED">SUSPENDED</option>
+          </select>
+        </div>
+
+        <div style="display: flex; gap: 0.6rem;">
+          <button type="submit" class="btn btn-primary" style="flex: 1;">Save Changes</button>
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-cms-edit-session')">Cancel</button>
+        </div>
+      </form>
     </div>
   </div>
 
