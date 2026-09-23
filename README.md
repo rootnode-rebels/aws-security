@@ -11,11 +11,21 @@ A cloud-native cybersecurity platform built on AWS Serverless architecture that 
 
 ---
 
+## 🛠️ Technology Stack
+
+* **Frontend:** Vanilla JavaScript (ES Modules), HTML5, CSS3 (Glassmorphism, custom cyber-node animations).
+* **Backend API:** FastAPI (Python 3.11) for high-performance, asynchronous REST API endpoints.
+* **Machine Learning:** Scikit-Learn & TensorFlow (Isolation Forest, Random Forest) for dynamic risk scoring and behavioral anomaly detection.
+* **Database:** AWS DocumentDB (Enterprise MongoDB-compatible NoSQL) with strict TLS encryption, falling back to a local JSON document store for zero-dependency local runs.
+* **Infrastructure:** AWS Serverless Application Model (SAM). Utilizes API Gateway, Lambda functions (within VPC), Amazon CloudWatch (Metrics & Alarms), and Amazon SNS.
+
+---
+
 ## 🏗️ System Architecture & Workflow
 
 Rather than trusting static passwords alone, incoming telemetry is evaluated on every session by an ensemble ML inference pipeline. The architecture enforces **Primary Device Authority**, **Zero-Data Leakage Challenges**, **Single-Device Super Admin Governance**, and **Tiered Intelligent Alert Routing**.
 
-`mermaid
+```mermaid
 flowchart TD
     subgraph CLIENT["Multi-Persona Cyber Suite"]
         U1["🛡️ User Security Portal<br/>(Primary Device, Siren & Remote Kill Switch)"]
@@ -54,7 +64,7 @@ flowchart TD
     COMPUTE --> STORAGE
     L3 -.->|All Security Events / Live Siren| U1
     L3 -.->|Critical Threats Only: Travel > 900km/h, Tor, Bursts| SNS
-`
+```
 
 ---
 
