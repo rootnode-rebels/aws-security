@@ -74,6 +74,7 @@ class NotificationDispatcher:
     def __init__(self):
         self._reload_config()
         self._boto3_sns_client = None
+        self._boto3_ses_client = None
         self._alert_cooldowns: Dict[str, float] = {}
 
     def _reload_config(self):
@@ -147,6 +148,23 @@ class NotificationDispatcher:
             return self._boto3_sns_client
         except Exception as e:
             logger.debug(f"[NotificationDispatcher] Boto3 SNS unavailable: {e}")
+            return None
+
+    def _get_ses_client(self):
+        """Lazy-initialize boto3 SES client if configured."""
+        if self._boto3_ses_client is not None:
+            return self._boto3_ses_client
+
+        if not os.getenv("SES_SOURCE_EMAIL"):
+            return None
+
+        try:
+            import boto3
+            session = boto3.Session()
+            self._boto3_ses_client = session.client("ses", region_name=os.getenv("AWS_REGION", "us-east-1"))
+            return self._boto3_ses_client
+        except Exception as e:
+            logger.debug(f"[NotificationDispatcher] Boto3 SES unavailable: {e}")
             return None
 
     def _publish_sns(self, recipient_email: str, subject: str, message: str, notification_type: str) -> bool:
@@ -258,10 +276,32 @@ class NotificationDispatcher:
                 # 1. Attempt AWS SNS Publish for serious security incidents
                 sns_success = self._publish_sns(recipient_email, subject, body_text, notification_type)
 
-                # 2. Attempt SMTP / Gmail Email for serious security incidents
-                smtp_success, smtp_err = self._send_smtp(recipient_email, subject, body_text, body_html or body_text)
-                if smtp_err and self.smtp_host:
-                    meta["delivery_warning"] = f"SMTP Delivery Error: {smtp_err}"
+                # 2. Attempt AWS SES Publish
+                ses_success = False
+                ses_client = self._get_ses_client()
+                if ses_client and os.getenv("SES_SOURCE_EMAIL"):
+                    try:
+                        ses_client.send_email(
+                            Source=os.getenv("SES_SOURCE_EMAIL"),
+                            Destination={'ToAddresses': [recipient_email]},
+                            Message={
+                                'Subject': {'Data': subject},
+                                'Body': {
+                                    'Html': {'Data': body_html or body_text},
+                                    'Text': {'Data': body_text}
+                                }
+                            }
+                        )
+                        ses_success = True
+                    except Exception as e:
+                        logger.warning(f"[NotificationDispatcher] AWS SES publish failed: {e}")
+
+                # 3. Attempt SMTP / Gmail Email for serious security incidents
+                smtp_success, smtp_err = False, None
+                if not ses_success:
+                    smtp_success, smtp_err = self._send_smtp(recipient_email, subject, body_text, body_html or body_text)
+                    if smtp_err and self.smtp_host:
+                        meta["delivery_warning"] = f"SMTP Delivery Error: {smtp_err}"
 
                 # Determine active channel representation
                 if sns_success and smtp_success:
