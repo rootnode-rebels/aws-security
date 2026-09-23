@@ -103,16 +103,23 @@ async def value_error_handler(request: Request, exc: ValueError):
 MAINTENANCE_MODE = False
 
 def is_super_admin_account(email_or_user) -> bool:
-    """Checks if an email or user dict matches the Super Admin role or configured Super Admin email."""
-    admin_cfg_email = os.getenv("SUPER_ADMIN_EMAIL", "superadmin@awssecurity.io").strip().lower()
-    allowed_admins = {admin_cfg_email, "superadmin@awssecurity.io"}
-    if isinstance(email_or_user, str):
-        return email_or_user.strip().lower() in allowed_admins
+    """Checks if an email or user dict matches the Super Admin role stored securely in database or env."""
     if isinstance(email_or_user, dict):
         if email_or_user.get("is_super_admin") or email_or_user.get("role") == "SUPER_ADMIN":
             return True
-        user_email = email_or_user.get("email", "").strip().lower()
-        return user_email in allowed_admins
+        email_or_user = email_or_user.get("email", "")
+
+    if isinstance(email_or_user, str) and email_or_user.strip():
+        e = email_or_user.strip().lower()
+        admin_cfg = os.getenv("SUPER_ADMIN_EMAIL", "").strip().lower()
+        if admin_cfg and e == admin_cfg:
+            return True
+        try:
+            u = db.users.find_one({"email": e})
+            if u and (u.get("role") == "SUPER_ADMIN" or u.get("is_super_admin")):
+                return True
+        except Exception:
+            pass
     return False
 
 def seed_demo_user_if_needed(force: bool = False):
