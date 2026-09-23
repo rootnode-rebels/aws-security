@@ -910,14 +910,14 @@ async function loadUserSessions(force = false) {
               <div class="session-device-cell">
                 <span class="material-symbols-outlined session-icon ${isPrimarySession ? 'text-emerald' : 'text-amber'}">${devIcon}</span>
                 <div>
-                  <div class="session-device-name">${s.device || 'Web Browser'}&nbsp;<span class="copy-btn" onclick="copyToClipboard('${s.session_id}', this)" title="Copy Session ID">📋</span></div>
+                  <div class="session-device-name">${escapeHtml(s.device || 'Web Browser')}&nbsp;<span class="copy-btn" onclick="copyToClipboard('${escapeHtml(s.session_id)}', this)" title="Copy Session ID">📋</span></div>
                   <div class="session-device-badge-wrap">${deviceBadge}</div>
                 </div>
               </div>
             </td>
             <td>
-              <div class="session-geo">${s.geo?.city || 'Local Location'}, ${s.geo?.country || 'US'}</div>
-              <div class="session-ip-mono text-muted" style="font-size: 0.76rem;">IP: ${s.ip_address}</div>
+              <div class="session-geo">${escapeHtml(s.geo?.city || 'Local Location')}, ${escapeHtml(s.geo?.country || 'US')}</div>
+              <div class="session-ip-mono text-muted" style="font-size: 0.76rem;">IP: ${escapeHtml(s.ip_address || '127.0.0.1')}</div>
             </td>
             <td>
               <span class="${isCurrent ? 'text-emerald' : 'text-secondary'} session-lifetime" style="display: flex; align-items: center; gap: 5px;">
@@ -1419,13 +1419,13 @@ async function loadUserAlerts(force = false) {
               ${riskBadge}
             </div>
             <div style="font-size: 0.82rem; color: #e2e8f0; line-height: 1.45;">
-              ${a.reason || 'Suspicious access detected.'}
+              ${escapeHtml(a.reason || 'Suspicious access detected.')}
             </div>
             ${isSecondaryApproval && vCode ? `
               <div class="verification-code-pod">
                 <div class="vcode-label-group">
                   <span class="vcode-micro-label">Secondary Device Verification Code</span>
-                  <span class="vcode-digits">${vCode}</span>
+                  <span class="vcode-digits">${escapeHtml(vCode)}</span>
                 </div>
                 ${isPending ? `
                   <span class="capsule-badge capsule-amber font-mono">
@@ -1433,15 +1433,15 @@ async function loadUserAlerts(force = false) {
                   </span>
                 ` : `
                   <span class="capsule-badge capsule-emerald font-mono">
-                    <span class="pulse-dot pulse-dot-emerald"></span>${a.status || 'RESOLVED'}
+                    <span class="pulse-dot pulse-dot-emerald"></span>${escapeHtml(a.status || 'RESOLVED')}
                   </span>
                 `}
               </div>
             ` : ''}
             <div class="alert-meta-box">
-              <div><span class="text-muted">Location:</span> <strong>${a.origin || 'Unknown'}</strong></div>
-              <div><span class="text-muted">${ipLabel}</span> <code class="font-mono text-cyan">${a.ip}</code></div>
-              <div><span class="text-muted">${clientLabel}</span> ${a.device || 'Web Browser'}</div>
+              <div><span class="text-muted">Location:</span> <strong>${escapeHtml(a.origin || 'Unknown')}</strong></div>
+              <div><span class="text-muted">${ipLabel}</span> <code class="font-mono text-cyan">${escapeHtml(a.ip || '')}</code></div>
+              <div><span class="text-muted">${clientLabel}</span> ${escapeHtml(a.device || 'Web Browser')}</div>
             </div>
             <div class="alert-actions-bar">
               ${actionsHtml}

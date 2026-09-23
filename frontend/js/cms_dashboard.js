@@ -102,22 +102,22 @@ async function cmsFetchUsers() {
       tr.innerHTML = `
         <td>
           <div style="display: flex; align-items: center; gap: 0.4rem;">
-            <strong>${user.full_name || user.name || 'User'}</strong>
+            <strong>${escapeHtml(user.full_name || user.name || 'User')}</strong>
             ${isSuper ? '<span class="badge badge-low font-mono" style="font-size: 0.65rem; color: var(--accent-amber); border-color: rgba(245, 158, 11, 0.4);" title="Super Administrator">👑 Super Admin</span>' : ''}
           </div>
         </td>
-        <td><code class="font-mono text-cyan">${user.email}</code>&nbsp;<span class="copy-btn" onclick="copyToClipboard('${user.email}')" title="Copy Email">??</span></td>
+        <td><code class="font-mono text-cyan">${escapeHtml(user.email)}</code>&nbsp;<span class="copy-btn" onclick="copyToClipboard('${escapeHtml(user.email)}')" title="Copy Email">📋</span></td>
         <td>${statusBadge}</td>
         <td>${mfaEnabled}</td>
-        <td style="font-size: 0.8rem; color: var(--text-muted);">${lastLogin}</td>
+        <td style="font-size: 0.8rem; color: var(--text-muted);">${escapeHtml(lastLogin)}</td>
         <td>
           <div style="display: flex; gap: 0.4rem; align-items: center;">
             ${isLocked ? `
-              <button class="btn btn-warning btn-sm" onclick="cmsUnlockUser('${user.email}')" title="Restore account access and unfreeze">
+              <button class="btn btn-warning btn-sm" onclick="cmsUnlockUser('${escapeHtml(user.email)}')" title="Restore account access and unfreeze">
                 Unlock
               </button>
             ` : ''}
-            <button class="btn btn-danger btn-sm" onclick="cmsDeleteUser('${user.email}')" title="Delete this user account permanently">
+            <button class="btn btn-danger btn-sm" onclick="cmsDeleteUser('${escapeHtml(user.email)}')" title="Delete this user account permanently">
               Delete
             </button>
           </div>

@@ -95,25 +95,25 @@ async function loadSecurityEvents(force = false) {
     tbody.innerHTML = events.map(e => `
       <tr>
         <td style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-dim);">
-          ${new Date(e.timestamp).toLocaleTimeString()}
+          ${escapeHtml(new Date(e.timestamp).toLocaleTimeString())}
         </td>
         <td>
-          <div style="font-weight: 600;">${e.user_email}</div>
-          <div style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">${e.ip_address}</div>
+          <div style="font-weight: 600;">${escapeHtml(e.user_email || 'Unknown')}</div>
+          <div style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">${escapeHtml(e.ip_address || '')}</div>
         </td>
-        <td>${e.geo?.city || 'Unknown'}, ${e.geo?.country || 'US'}</td>
+        <td>${escapeHtml(e.geo?.city || 'Unknown')}, ${escapeHtml(e.geo?.country || 'US')}</td>
         <td>
           <span class="badge ${e.risk_score >= 70 ? 'badge-high' : e.risk_score >= 40 ? 'badge-medium' : 'badge-low'}">
-            ${e.risk_score}/100
+            ${Number(e.risk_score || 0)}/100
           </span>
         </td>
         <td>
           <span style="font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700; color: ${e.action_taken === 'BLOCK_SESSION' ? 'var(--accent-crimson)' : e.action_taken === 'STEP_UP_MFA' ? 'var(--accent-amber)' : 'var(--accent-emerald)'};">
-            ${e.action_taken}
+            ${escapeHtml(e.action_taken || 'ALLOW')}
           </span>
         </td>
         <td>
-          <button class="btn btn-secondary btn-sm" onclick="inspectEvent('${e.event_id}')">
+          <button class="btn btn-secondary btn-sm" onclick="inspectEvent('${escapeHtml(e.event_id)}')">
             Inspect
           </button>
         </td>
@@ -142,10 +142,10 @@ async function inspectEvent(eventId) {
       body.innerHTML = `
         <div style="margin-bottom: 1rem;">
           <span class="badge ${event.risk_score >= 70 ? 'badge-high' : event.risk_score >= 40 ? 'badge-medium' : 'badge-low'}">
-            Risk Score: ${event.risk_score}/100 • ${event.risk_level}
+            Risk Score: ${Number(event.risk_score || 0)}/100 • ${escapeHtml(event.risk_level || 'LOW')}
           </span>
-          <h3 style="margin-top: 0.5rem; color: #fff;">${event.action_taken}</h3>
-          <p style="font-size: 0.85rem; color: var(--text-muted);">Event ID: <code>${event.event_id}</code> • User: ${event.user_email}</p>
+          <h3 style="margin-top: 0.5rem; color: #fff;">${escapeHtml(event.action_taken || 'ALLOW')}</h3>
+          <p style="font-size: 0.85rem; color: var(--text-muted);">Event ID: <code>${escapeHtml(event.event_id)}</code> • User: ${escapeHtml(event.user_email || 'Unknown')}</p>
         </div>
 
         <h4 style="font-size: 0.9rem; color: #fff; margin-bottom: 0.4rem;">Explainable AI Factor Attribution:</h4>
@@ -153,21 +153,21 @@ async function inspectEvent(eventId) {
           ${(event.factors || []).map(f => `
             <div style="background: rgba(255,255,255,0.04); padding: 0.5rem 0.75rem; border-radius: 6px; margin-bottom: 0.4rem; border-left: 3px solid ${f.severity === 'CRITICAL' ? 'var(--accent-crimson)' : 'var(--accent-amber)'};">
               <div style="display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: 600;">
-                <span>${f.factor}</span>
-                <span style="color: var(--accent-amber);">+${f.weight} pts</span>
+                <span>${escapeHtml(f.factor)}</span>
+                <span style="color: var(--accent-amber);">+${Number(f.weight || 0)} pts</span>
               </div>
-              <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.2rem;">${f.detail}</div>
+              <div style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.2rem;">${escapeHtml(f.detail)}</div>
             </div>
           `).join("") || "<div style='color: var(--text-dim);'>No anomalous factors detected. Normal baseline.</div>"}
         </div>
 
         <h4 style="font-size: 0.9rem; color: #fff; margin-bottom: 0.4rem;">Deep Autoencoder Reconstruction:</h4>
         <div style="font-family: var(--font-mono); font-size: 0.8rem; background: #050811; padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; color: #6ee7b7;">
-          MSE Reconstruction Error: ${event.autoencoder_loss || 0.0012} (Anomaly threshold: 0.12)
+          MSE Reconstruction Error: ${escapeHtml(event.autoencoder_loss || 0.0012)} (Anomaly threshold: 0.12)
         </div>
 
         <h4 style="font-size: 0.9rem; color: #fff; margin-bottom: 0.4rem;">Raw Telemetry Payload:</h4>
-        <pre style="background: #050811; padding: 0.75rem; border-radius: 6px; font-size: 0.75rem; color: #94a3b8; overflow-x: auto;">${JSON.stringify(event, null, 2)}</pre>
+        <pre style="background: #050811; padding: 0.75rem; border-radius: 6px; font-size: 0.75rem; color: #94a3b8; overflow-x: auto;">${escapeHtml(JSON.stringify(event, null, 2))}</pre>
       `;
     }
     openModal("modal-event-inspect");

@@ -12,6 +12,8 @@ import asyncio
 import json
 import random
 import secrets
+import hmac
+import ipaddress
 
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -138,16 +140,10 @@ def seed_demo_user_if_needed(force: bool = False):
             db.users.update_one(
                 {"email": admin_email},
                 {"$set": {
-                    "password_hash": adm_pw_hash,
-                    "salt": adm_salt,
-                    "secondary_password_hash": adm_sec_hash,
-                    "secondary_password_salt": adm_sec_salt,
                     "role": "SUPER_ADMIN",
                     "is_root_admin": True,
                     "is_super_admin": True,
-                    "status": "ACTIVE",
-                    "email_verification_code": None,
-                    "mfa_enabled": False
+                    "status": "ACTIVE"
                 }}
             )
             print(f"[AWSSecurity] Verified Super Admin active: {admin_email} / [SECURED]")
@@ -399,12 +395,10 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, A
     
     is_primary = bool(session.get("is_primary_device") or session.get("device_tier") == "PRIMARY")
 
-    # Primary device session is perpetual and immune to automatic revocation or timeout
-    if not is_primary:
-        now = datetime.now(timezone.utc).isoformat()
-        if session.get("expires_at", "") < now:
-            db.active_sessions.delete_one({"session_token": token})
-            raise HTTPException(status_code=401, detail="Session has expired. Please log in again.")
+    now = datetime.now(timezone.utc).isoformat()
+    if session.get("expires_at", "") and session.get("expires_at", "") < now:
+        db.active_sessions.delete_one({"session_token": token})
+        raise HTTPException(status_code=401, detail="Session has expired. Please log in again.")
 
     user = db.users.find_one({"email": session.get("user_email")})
     if not user:
@@ -475,8 +469,6 @@ def register(payload: RegisterSchema, request: Request):
         "registered_at": now_iso
     } if fingerprint else None
 
-    is_admin = clean_email.lower() in ("likhithadm@gmail.com", "superadmin@awssecurity.io")
-
     user_doc = {
         "email": clean_email,
         "full_name": clean_name,
@@ -488,9 +480,9 @@ def register(payload: RegisterSchema, request: Request):
         "has_confirmed_primary": False,
         "status": "ACTIVE",
         "email_verification_code": None,
-        "role": "SUPER_ADMIN" if is_admin else "USER",
-        "is_root_admin": True if is_admin else False,
-        "is_super_admin": True if is_admin else False,
+        "role": "USER",
+        "is_root_admin": False,
+        "is_super_admin": False,
         "created_at": now_iso,
         "updated_at": now_iso,
         "trusted_devices": [fingerprint] if fingerprint else [],
@@ -502,7 +494,7 @@ def register(payload: RegisterSchema, request: Request):
         },
         "mfa_secret": None,
         "mfa_pending": None,
-        "mfa_enabled": False if is_admin else True
+        "mfa_enabled": True
     }
     db.users.insert_one(user_doc)
 
@@ -530,18 +522,29 @@ class VerifyEmailSchema(BaseModel):
     code: str
 
 @app.post("/api/auth/verify-email", status_code=200)
-def verify_email(payload: VerifyEmailSchema):
+def verify_email(payload: VerifyEmailSchema, request: Request):
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    is_locked_ip, remaining = rate_limiter.is_locked(client_ip)
+    if is_locked_ip:
+        raise HTTPException(status_code=429, detail=f"Too many verification attempts. Try again in {remaining}s.")
+
     clean_email = sanitize_email(payload.email)
     user = db.users.find_one({"email": clean_email})
     if not user:
+        rate_limiter.record_failure(client_ip)
         raise HTTPException(status_code=400, detail="Invalid verification request.")
     
     if user.get("status") == "ACTIVE":
         return {"status": "success", "message": "Email is already verified."}
         
-    if str(user.get("email_verification_code")) != str(payload.code).strip():
-        raise HTTPException(status_code=400, detail="Invalid verification code.")
+    stored_code = user.get("email_verification_code")
+    code_input = str(payload.code).strip()
+    if not stored_code or not code_input or not hmac.compare_digest(str(stored_code), code_input):
+        rate_limiter.record_failure(client_ip)
+        rate_limiter.record_failure(f"acct:{clean_email}")
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code.")
         
+    rate_limiter.record_success(f"acct:{clean_email}")
     # Mark as active
     db.users.update_one(
         {"email": clean_email},
@@ -557,14 +560,34 @@ def verify_email(payload: VerifyEmailSchema):
 
 
 def resolve_client_ip(request: Request, spoofed_ip: Optional[str] = None) -> str:
-    """Extracts client IP, respecting reverse proxies (ALB/CloudFront) and simulation overrides."""
-    if spoofed_ip:
-        return spoofed_ip
-    # xff = request.headers.get("x-forwarded-for")
-    # if xff:
-    #     client_ip = xff.split(",")[0].strip()
-    #     if client_ip:
-    #         return client_ip
+    """Extracts client IP, respecting reverse proxies (Cloudflare/ALB/CloudFront) and simulation overrides."""
+    is_dev = os.getenv("DEPLOYMENT_MODE", "DEVELOPMENT").upper() in ("DEVELOPMENT", "TEST", "DEMO", "")
+    if spoofed_ip and is_dev:
+        try:
+            ipaddress.ip_address(spoofed_ip.strip())
+            return spoofed_ip.strip()
+        except ValueError:
+            pass
+
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip and cf_ip.strip():
+        val = cf_ip.strip()
+        try:
+            ipaddress.ip_address(val)
+            return val
+        except ValueError:
+            pass
+
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        client_ip = xff.split(",")[0].strip()
+        if client_ip:
+            try:
+                ipaddress.ip_address(client_ip)
+                return client_ip
+            except ValueError:
+                pass
+
     if request.client and request.client.host:
         return request.client.host
     return "127.0.0.1"
@@ -999,7 +1022,7 @@ def login(payload: LoginSchema, request: Request):
         device_tier = "PRIMARY"
         is_primary = True
         device_label = f"Primary Security Portal ({device_name})"
-        session_expires_at = "2099-12-31T23:59:59Z"
+        session_expires_at = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
         primary_data = {
             "browser_id": browser_id,
             "browser": browser_name,
@@ -1030,8 +1053,7 @@ def login(payload: LoginSchema, request: Request):
             device_tier = "PRIMARY"
             is_primary = True
             device_label = f"Primary Security Portal ({device_name})"
-            # Primary device session is perpetual and never expires
-            session_expires_at = "2099-12-31T23:59:59Z"
+            session_expires_at = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
         else:
             # Secondary device login: MUST BE APPROVED BY PRIMARY DEVICE!
             otp = generate_mfa_code()
@@ -1190,7 +1212,15 @@ def verify_mfa(payload: VerifyMFASchema):
         raise HTTPException(status_code=400, detail="Verification code has expired. Please try logging in again.")
 
     if mfa_state.get("code") != payload.mfa_code.strip():
-        raise HTTPException(status_code=400, detail="Invalid verification code.")
+        failed_count = mfa_state.get("failed_attempts", 0) + 1
+        if failed_count >= 5:
+            db.users.update_one({"email": email}, {"$set": {"mfa_pending": None}})
+            rate_limiter.record_failure(f"acct:{email}")
+            raise HTTPException(status_code=429, detail="Too many invalid MFA verification attempts. Challenge cancelled.")
+        else:
+            db.users.update_one({"email": email}, {"$set": {"mfa_pending.failed_attempts": failed_count}})
+            remaining = 5 - failed_count
+            raise HTTPException(status_code=400, detail=f"Invalid verification code. {remaining} attempt(s) remaining.")
 
     # MFA verified successfully: clear challenge and issue full session
     attempt = mfa_state.get("attempt", {})
@@ -1208,7 +1238,7 @@ def verify_mfa(payload: VerifyMFASchema):
     has_primary = bool(user.get("primary_device"))
     device_tier = "SECONDARY" if has_primary else "PRIMARY"
     is_primary = False if has_primary else True
-    session_expires = "2099-12-31T23:59:59Z" if is_primary else (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    session_expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat() if is_primary else (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
     dev_label = mfa_state.get("device_label") or dev_name
 
     db.active_sessions.insert_one({
@@ -1300,7 +1330,7 @@ def poll_mfa_status(temp_token: str):
         has_primary = bool(user.get("primary_device"))
         device_tier = "SECONDARY" if has_primary else "PRIMARY"
         is_primary = False if has_primary else True
-        session_expires = "2099-12-31T23:59:59Z" if is_primary else (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+        session_expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat() if is_primary else (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
 
         db.active_sessions.insert_one({
             "session_id": session_id,
@@ -1540,6 +1570,12 @@ def change_password(payload: ChangePasswordSchema, request: Request, user: Dict[
         }}
     )
 
+    # Invalidate other active sessions to terminate potential unauthorized sessions
+    auth_header = request.headers.get("authorization", "")
+    current_token = auth_header.split(" ")[1] if auth_header.startswith("Bearer ") else None
+    if current_token:
+        db.active_sessions.delete_many({"user_email": email, "session_token": {"$ne": current_token}})
+
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
         level="INFO",
@@ -1550,7 +1586,7 @@ def change_password(payload: ChangePasswordSchema, request: Request, user: Dict[
     notif = notification_service.send_password_changed(email, client_ip)
     broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
 
-    return {"status": "SUCCESS", "message": "Master password successfully updated."}
+    return {"status": "SUCCESS", "message": "Master password successfully updated. Other active sessions terminated."}
 
 
 # -------------------------------------------------------------
@@ -1658,7 +1694,7 @@ def set_primary_device(payload: SetPrimaryDeviceSchema, authorization: Optional[
                 "device_tier": "PRIMARY",
                 "is_primary_device": True,
                 "device": device_label,
-                "expires_at": "2099-12-31T23:59:59Z"
+                "expires_at": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
             }}
         )
         msg = f"Primary Device authority successfully saved for this device ({device_label})."
@@ -1956,20 +1992,19 @@ def dismiss_all_user_alerts(user: Dict[str, Any] = Depends(get_current_user)):
 
 
 @app.get("/api/security/dispatched-notifications")
-def get_dispatched_notifications(limit: int = 50, user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)):
+def get_dispatched_notifications(limit: int = 50, user: Dict[str, Any] = Depends(get_current_user)):
     """
     Returns recent notifications dispatched via Amazon SNS / SES / Email simulator.
-    Authenticated users see their own messages; unauthenticated/SOC preview sees recent notifications.
+    Authenticated users see only their own messages; Super/Security Admin can inspect platform dispatches.
     """
-    query = {}
-    if user and user.get("role") != "SECURITY_ADMIN":
-        query["recipient_email"] = user["email"]
+    is_admin = bool(user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin"))
+    query = {} if is_admin else {"recipient_email": user["email"]}
 
     records = db.get_collection("dispatched_notifications").find(
         query,
         sort_key="created_at",
         reverse=True,
-        limit=limit
+        limit=min(limit, 100)
     )
     for r in records:
         if "_id" in r:
@@ -1990,11 +2025,10 @@ def get_dispatched_notifications(limit: int = 50, user: Optional[Dict[str, Any]]
 
 @app.post("/api/security/dispatched-notifications/clear")
 @app.delete("/api/security/dispatched-notifications")
-def clear_dispatched_notifications(user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)):
-    """Clears all dispatched security alerts and recovery emails from the mailbox."""
-    query = {}
-    if user and user.get("role") != "SECURITY_ADMIN":
-        query["recipient_email"] = user["email"]
+def clear_dispatched_notifications(user: Dict[str, Any] = Depends(get_current_user)):
+    """Clears dispatched security alerts and recovery emails from the mailbox."""
+    is_admin = bool(user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin"))
+    query = {} if is_admin else {"recipient_email": user["email"]}
     del_count = db.get_collection("dispatched_notifications").delete_many(query)
     return {
         "status": "SUCCESS",
@@ -2088,8 +2122,17 @@ class SimulateAttackSchema(BaseModel):
 
 @app.post("/api/security/simulate-attack")
 @app.post("/api/security/simulate-scenario")
-def simulate_attack(payload: SimulateAttackSchema):
-    email = sanitize_email(payload.target_email)
+def simulate_attack(payload: SimulateAttackSchema, auth_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)):
+    target_email = sanitize_email(payload.target_email)
+    is_dev = os.getenv("DEPLOYMENT_MODE", "DEVELOPMENT").upper() in ("DEVELOPMENT", "TEST", "DEMO", "")
+    if not auth_user and not is_dev:
+        raise HTTPException(status_code=401, detail="Authentication required to run attack simulations.")
+
+    is_admin = bool(auth_user and (auth_user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or auth_user.get("is_super_admin")))
+    if auth_user and not is_admin and target_email != auth_user.get("email"):
+        raise HTTPException(status_code=403, detail="Simulations are restricted to your own authenticated account.")
+
+    email = target_email
     user = db.users.find_one({"email": email})
 
     # Base coordinates
@@ -2245,15 +2288,38 @@ def simulate_attack(payload: SimulateAttackSchema):
 
 
 @app.get("/api/security/events")
-def get_security_events(limit: int = 50):
-    events = db.security_events.find(sort_key="timestamp", reverse=True, limit=min(limit, 100))
+def get_security_events(limit: int = 50, user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)):
+    is_admin = bool(user and (user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin")))
+    is_dev = os.getenv("DEPLOYMENT_MODE", "DEVELOPMENT").upper() in ("DEVELOPMENT", "TEST", "DEMO", "")
+
+    if is_admin:
+        query = {}
+    elif user:
+        query = {"user_email": user["email"]}
+    elif is_dev:
+        query = {}
+    else:
+        raise HTTPException(status_code=401, detail="Authentication required to view security events.")
+
+    events = db.security_events.find(query, sort_key="timestamp", reverse=True, limit=min(limit, 100))
+    if not is_admin:
+        for ev in events:
+            if not user or ev.get("user_email") != user.get("email"):
+                parts = ev.get("user_email", "").split("@")
+                if len(parts) == 2 and len(parts[0]) > 1:
+                    ev["user_email"] = parts[0][0] + "***@" + parts[1]
     return {"events": events}
 
 
 @app.post("/api/security/events/clear")
 @app.delete("/api/security/events")
-def clear_security_events():
-    """Clears all security events, login attempts, and real-time stream logs."""
+def clear_security_events(user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)):
+    """Clears all security events, login attempts, and real-time stream logs (Admin restricted)."""
+    if os.getenv("DEPLOYMENT_MODE", "").upper() not in ("DEVELOPMENT", "TEST"):
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required.")
+        if not (user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin")):
+            raise HTTPException(status_code=403, detail="Super Admin privileges required.")
     del_count = db.security_events.delete_many({})
     return {
         "status": "SUCCESS",
@@ -2296,8 +2362,13 @@ def get_cloudwatch_telemetry():
 
 @app.post("/api/monitoring/cloudwatch/clear")
 @app.delete("/api/monitoring/cloudwatch")
-def clear_cloudwatch_telemetry():
-    """Clears all CloudWatch audit logs and resets telemetry counters."""
+def clear_cloudwatch_telemetry(user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)):
+    """Clears all CloudWatch audit logs and resets telemetry counters (Admin restricted)."""
+    if os.getenv("DEPLOYMENT_MODE", "").upper() not in ("DEVELOPMENT", "TEST"):
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required.")
+        if not (user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin")):
+            raise HTTPException(status_code=403, detail="Super Admin privileges required.")
     cloudwatch.clear_logs()
     return {
         "status": "SUCCESS",
@@ -2356,6 +2427,8 @@ def cms_get_users(user: Dict[str, Any] = Depends(check_super_admin)):
     for u in users:
         u.pop("password_hash", None)
         u.pop("salt", None)
+        u.pop("secondary_password_hash", None)
+        u.pop("secondary_password_salt", None)
         u.pop("mfa_secret", None)
         u.pop("mfa_pending", None)
         u["role"] = u.get("role", "USER")
@@ -2510,12 +2583,19 @@ if os.path.exists(FRONTEND_DIR):
 
 @app.get("/{full_path:path}")
 def serve_spa(full_path: str):
-    # If file exists in frontend, serve it
-    potential_file = os.path.join(FRONTEND_DIR, full_path)
-    if full_path and os.path.isfile(potential_file):
-        return FileResponse(potential_file)
+    frontend_abs = os.path.abspath(FRONTEND_DIR)
+    # Prevent directory traversal attacks
+    if full_path:
+        potential_file = os.path.abspath(os.path.join(frontend_abs, full_path))
+        # Ensure target file stays strictly inside FRONTEND_DIR
+        try:
+            if os.path.commonpath([frontend_abs, potential_file]) == frontend_abs and os.path.isfile(potential_file):
+                return FileResponse(potential_file)
+        except (ValueError, Exception):
+            pass
+
     # Default to index.html
-    index_file = os.path.join(FRONTEND_DIR, "index.html")
+    index_file = os.path.join(frontend_abs, "index.html")
     if os.path.exists(index_file):
         response = FileResponse(index_file)
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
