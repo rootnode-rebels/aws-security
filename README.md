@@ -11,11 +11,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
 **An enterprise-grade, cloud-native cybersecurity platform built on AWS Serverless architecture and Continuous Behavioral Machine Learning.**  
-*Defends against credential stuffing, session hijacking, distributed brute-force attacks, and impossible travel anomalies in under 5 milliseconds.*
+*Detects and blocks credential stuffing, session hijacking, distributed brute-force attacks, and impossible travel anomalies in under 5 milliseconds.*
 
 ---
 
-[Key Innovations](#-key-innovations) • [Architecture](#-cloud-native-system-architecture) • [Behavioral ML Engine](#-7-dimensional-behavioral-ml-pipeline) • [Adaptive Security](#-adaptive-security-policy--notification-routing) • [Zero-Trust Hardening](#-security-hardening--audit-verification) • [Super Admin CMS](#-super-admin-governance--session-control) • [Quickstart](#-quick-start-guide) • [Live Demo](#-live-two-browser-demonstration) • [Tests](#-automated-testing--audit-verification)
+[Tech Stack](#-complete-technology-stack) • [AWS Deep Dive & How It Works](#-deep-dive-how-aws-services-work) • [ML Engine](#-7-dimensional-behavioral-ml-pipeline) • [Adaptive Security](#-adaptive-security-policy--notification-routing) • [Zero-Trust Hardening](#-security-hardening--audit-verification) • [Super Admin CMS](#-super-admin-governance--session-control) • [Quickstart](#-quick-start-guide) • [Live Demo](#-live-two-browser-demonstration) • [Tests](#-automated-testing--audit-verification)
 
 ---
 
@@ -29,7 +29,7 @@
 ├─────────────────────────┬──────────────────────────┬───────────────────────────────────┤
 │ 🛡️ Primary Device       │ 🧠 Continuous ML         │ ⚡ Red Team Attack Studio         │
 │   Authority: Master     │   Inference: Hybrid      │   Simulates Tor Exit relays,      │
-│   device holds kill     │   Random Forest, Iso-    │   intercontinental velocity       │
+│   workstation holds kill│   Random Forest, Iso-    │   intercontinental velocity       │
 │   switch & approves     │   Forest & Deep Neural   │   bursts, and mobile canvas       │
 │   secondary logins.     │   Autoencoder (MSE).     │   spoofing in 1-click.            │
 ├─────────────────────────┼──────────────────────────┴───────────────────────────────────┤
@@ -48,94 +48,180 @@
 
 ---
 
-## 🏗️ Cloud-Native System Architecture
+## 🧰 Complete Technology Stack
 
-The application is architected around the AWS Serverless Application Model (SAM), orchestrating Amazon API Gateway, AWS Lambda microservices, Amazon CloudWatch telemetry, and Amazon SNS notification dispatching.
+| Layer | Technologies & Libraries | Purpose & Function |
+| :--- | :--- | :--- |
+| **API & Backend** | **Python 3.10+**, **FastAPI**, **Starlette**, **Uvicorn** | High-concurrency asynchronous ASGI REST API gateway with sub-5ms request routing. |
+| **Data Validation** | **Pydantic v2**, **Regex Engine** | Strict schema validation, type safety, field length clamping, and input sanitization. |
+| **Machine Learning** | **Scikit-Learn 1.4+**, **TensorFlow 2.15+ / Keras** | Supervised Random Forest Classifier, Unsupervised Isolation Forest, and 7-4-2-4-7 Deep Neural Autoencoder. |
+| **Data Science** | **NumPy**, **Pandas**, **Joblib** | High-performance numerical vector transformations and serialized pipeline model loading. |
+| **Cryptography** | **Hashlib (PBKDF2-HMAC-SHA256)**, **Secrets**, **HMAC** | 200,000 hashing rounds with 16-byte cryptographically secure salts (`secrets.token_hex`), constant-time digest comparison (`hmac.compare_digest`), and token generation (`secrets.token_urlsafe`). |
+| **Security & Defense** | **Custom RateLimiter**, **Input Sanitizer**, **OWASP Middleware** | Dual-layer sliding-window brute-force rate limiter, recursive NoSQL operator neutralizing, XSS escaping, and HTTP security headers (CSP, HSTS, X-Frame-Options). |
+| **Cloud & Serverless** | **AWS SAM**, **Amazon API Gateway**, **AWS Lambda**, **Amazon CloudWatch**, **Amazon SNS**, **Amazon SES** | Cloud-native serverless microservices, metric collection, alert pub/sub, and out-of-band email routing. |
+| **Database & Storage** | **MongoDB 7.0**, **PyMongo**, **Local JSON Document Store** | Multi-model document persistence supporting distributed MongoDB clusters with zero-dependency atomic JSON file fallback. |
+| **Frontend UI** | **Vanilla HTML5**, **CSS3 (Glassmorphism)**, **ES6+ JavaScript** | Ultra-responsive cyberpunk-themed interface without heavy framework overhead; SVG gauges, world flight map, and SSE real-time streams. |
+| **Network & Tunneling** | **Cloudflare Quick Tunnel (`cloudflared`)**, **Urllib** | Secure encrypted public HTTPS tunneling without port-forwarding or reverse-proxy configuration. |
+
+---
+
+## ☁️ Deep Dive: How AWS Services Work
+
+This platform is engineered to run both natively on **AWS Serverless infrastructure** (via `aws/template.yaml`) and locally using zero-dependency emulation microservices.
 
 ```mermaid
 flowchart TD
-    subgraph CLIENT["Multi-Persona Cyber Suite (Frontend Web UI)"]
-        U1["🛡️ User Security Portal<br/>(Primary Device, Siren & Remote Kill Switch)"]
-        U2["⚡ Red Team Attack Studio<br/>(Tokyo Travel, Tor Relays, Credential Stuffing)"]
-        U3["🛰️ Blue Team SOC Visualizer<br/>(Real-time SVG Gauge & Haversine Flight Map)"]
-        U4["👑 CMS Governance & Super Admin Console<br/>(User Directory, Unlock/Purge, Maintenance)"]
-        U5["📊 CloudWatch SIEM Dashboard<br/>(Metrics, Alarms, Invocation Latency, Audit Logs)"]
+    subgraph CLIENT["1. Client Telemetry Ingress"]
+        C1["User Workstation / Mobile Browser"]
+        C2["Red Team Attack Simulator"]
     end
 
-    subgraph GATEWAY["API Gateway & Request Sanitization Layer"]
-        GW["REST API Gateway (CORS & IP Rate Limiting)"]
-        V["Pydantic Strict Schemas • OWASP Headers<br/>Recursive XSS & NoSQL Operator Sanitizer"]
+    subgraph APIGW["2. Amazon API Gateway"]
+        AG1["REST API Gateway (Stage: /prod)"]
+        AG2["CORS & Request Header Validation"]
+        AG3["Client IP Extraction (CF-Connecting-IP / XFF)"]
     end
 
-    subgraph COMPUTE["AWS Lambda Serverless Microservices"]
-        L1["Auth & Session Handler<br/>(PBKDF2-SHA256, Anti-Timing Dummy, Finite Sessions)"]
-        L2["Account Hijack Risk Engine<br/>(Behavioral Feature Extraction & Risk Scoring)"]
-        L3["Tiered Alert Dispatcher<br/>(Primary Device SSE, OS Toast & Out-of-Band SNS)"]
-        L4["CMS & Governance Engine<br/>(Emergency Maintenance & Remote Session Revocation)"]
+    subgraph LAMBDA["3. AWS Lambda Serverless Microservices"]
+        L1["AuthHandler Lambda<br/>(PBKDF2-SHA256, Anti-Timing Dummy, Session Tokens)"]
+        L2["AccountHijackRiskEngine Lambda<br/>(7D Feature Extractor, Random Forest, Autoencoder)"]
+        L3["AlertDispatcher Lambda<br/>(Deduplication Filter, Cooldown Enforcer, SNS Publisher)"]
+        L4["CMSGovernanceEngine Lambda<br/>(Single-Device Session Enforcement, Maintenance Mode)"]
     end
 
-    subgraph ML["Hybrid Machine Learning Pipeline"]
-        M1["Scikit-Learn Random Forest<br/>(Supervised Hijacking Probability 0-100%)"]
-        M2["Scikit-Learn Isolation Forest<br/>(Unsupervised Zero-Day Outlier Scoring)"]
-        M3["TensorFlow Deep Autoencoder<br/>(Reconstruction MSE Loss > 0.12)"]
-        M4["Explainable AI Engine<br/>(Root-Cause Factor Attribution Weights)"]
+    subgraph CW["4. Amazon CloudWatch Telemetry & SIEM"]
+        CW1["Log Groups (/aws/lambda/AuthHandler, /RiskEngine)"]
+        CW2["Custom CloudWatch Metrics (BlockedHijacks, StepUpMFA)"]
+        CW3["CloudWatch Alarm (HighRiskRateAlarm)"]
     end
 
-    subgraph STORAGE["Storage & Real-Time Telemetry Layer"]
-        CW["Amazon CloudWatch<br/>(Metrics: BlockedHijacks, StepUpMFA, Latency)"]
-        SNS["Amazon SNS & SES<br/>(Out-of-Band Emergency Email & SMS Dispatch)"]
-        DB["MongoDB 7.0 / Transparent Document Store<br/>(Atomic Thread-Safe Persistence)"]
+    subgraph NOTIF["5. Amazon SNS & SES Out-of-Band Routing"]
+        SNS1["SNS Topic (AccountHijackSecurityAlerts)"]
+        SES1["Amazon SES / SMTP Email Gateway"]
+        SSE1["Server-Sent Events (SSE) Live Push Stream"]
     end
 
-    CLIENT -->|HTTPS / REST| GW --> V --> COMPUTE
-    L2 --> ML
-    COMPUTE --> STORAGE
-    L3 -.->|Live SSE Alerts & Audible Siren| U1
-    L3 -.->|High-Risk Hijack Notifications| SNS
+    subgraph DATA["6. Document Store & State"]
+        DB1["Amazon DocumentDB / MongoDB Cluster"]
+        DB2["Local Atomic JSON Store (data/db.json)"]
+    end
+
+    CLIENT -->|HTTPS / REST| APIGW
+    APIGW -->|JSON Event Payload| LAMBDA
+    L1 <--> L2
+    L2 -->|Risk Score >= 70| L3
+    LAMBDA --> CW
+    L3 --> SNS1
+    L3 --> SES1
+    L3 --> SSE1
+    LAMBDA <--> DATA
+    CW2 --> CW3
+```
+
+### 1. Amazon API Gateway (Ingress & Protocol Mediation)
+- **Edge Security & Routing:** Serves as the front door for incoming traffic. Handles TLS termination, enforces Cross-Origin Resource Sharing (CORS) whitelists, and manages REST routes (`/api/auth/*`, `/api/security/*`, `/api/cms/*`).
+- **IP & Header Preservation:** Forwards client proxy headers (`CF-Connecting-IP`, `X-Forwarded-For`, and `User-Agent`) to downstream Lambda functions, enabling accurate GeoIP resolution even through reverse proxies and CDN edges.
+
+### 2. AWS Lambda (Serverless Microservices Compute)
+The application architecture is decomposed into distinct, stateless serverless functions:
+- **`AuthHandler` (Authentication & Session Authority):**
+  - Executes PBKDF2-HMAC-SHA256 verification (200,000 iterations).
+  - Implements **timing-attack immunity**: If an unregistered account or locked user signs in, the Lambda executes a full dummy PBKDF2 cycle with constant-time comparison to prevent side-channel username enumeration.
+  - Enforces finite 30-day session lifespans and issues cryptographically signed session tokens.
+- **`AccountHijackRiskEngine` (Behavioral Intelligence):**
+  - Computes the 7-dimensional behavioral feature vector in real time.
+  - Queries user baseline profiles and evaluates anomaly scores across the **Scikit-Learn Random Forest**, **Isolation Forest**, and **TensorFlow Deep Neural Autoencoder**.
+  - Generates itemized Explainable AI (XAI) factor weights.
+- **`AlertDispatcher` (Intelligent Alert Routing):**
+  - Applies a sliding-window deduplication cooldown (default: 300s) to prevent alert flooding.
+  - Routes critical hijacking alerts ($> 70\text{ pts}$) to Amazon SNS, triggers Windows Desktop toast notifications, and emits live Server-Sent Events (SSE) to connected primary devices.
+- **`CMSGovernanceEngine` (Platform Administration):**
+  - Manages single-device session enforcement for the Super Admin role.
+  - Provides emergency maintenance mode toggles and remote session revocation capabilities.
+
+### 3. Amazon CloudWatch (SIEM Metrics & Alarms)
+- **Structured Audit Logging:** Every login evaluation, session termination, and policy decision is recorded in dedicated log groups (`/aws/lambda/AuthHandler` and `/aws/lambda/AccountHijackRiskEngine`).
+- **Custom Metric Counters:**
+  - `BlockedHijacks`: Incremented on critical threat blocks (e.g. Impossible Travel $> 900\text{ km/h}$).
+  - `StepUpMFA`: Incremented on medium-risk step-up challenges.
+  - `AllowSessions`: Tracks normal, baseline sign-in volume.
+  - `InvocationLatency`: Tracks millisecond execution latencies across all API paths.
+- **CloudWatch Alarms (`HighRiskRateAlarm`):** Evaluates anomaly spikes within a 1-minute window. If `BlockedHijacks > 5`, the alarm enters the `ALARM` state and automatically triggers incident response workflows via Amazon SNS.
+
+### 4. Amazon SNS & SES (Out-of-Band Notification Routing)
+- **Amazon SNS Topic (`AccountHijackSecurityAlerts`):** Pub/sub messaging channel distributing high-priority threat alerts to registered administrative endpoints, Webhook listeners, and user mobile devices.
+- **Amazon SES / SMTP Integration:** Dispatches professional, out-of-band email alerts for Critical Risk events, step-up MFA codes, and password rotation confirmations.
+
+---
+
+## 🔄 End-to-End Authentication & Threat Interception Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Client / Attacker
+    participant GW as API Gateway
+    participant Auth as AuthHandler (Lambda)
+    participant ML as Risk Engine (Lambda)
+    participant DB as MongoDB / Document Store
+    participant CW as Amazon CloudWatch
+    participant SNS as Amazon SNS / Email
+    actor Primary as Primary Device (Master)
+
+    User->>GW: POST /api/auth/login (Credentials, Fingerprint, IP)
+    GW->>Auth: Forward sanitized payload & client headers
+    Auth->>DB: Check rate-limiter & retrieve user baseline
+    DB-->>Auth: User profile & historical telemetry
+    
+    Auth->>ML: Evaluate behavioral telemetry
+    Note over ML: Calculate Haversine velocity, canvas diff, autoencoder MSE
+    ML-->>Auth: Risk Score (0-100), Action (ALLOW / STEP_UP / BLOCK), XAI Factors
+    
+    alt Risk Score >= 70 (Critical Hijack: Impossible Travel / Tor)
+        Auth->>DB: Record security event & freeze account
+        Auth->>CW: Increment BlockedHijacks metric & record WARN log
+        Auth->>SNS: Publish threat alert to SNS Topic
+        Auth->>Primary: Push live SSE alert & trigger audible siren 🔊
+        Auth-->>GW: HTTP 403 Forbidden (Access Blocked)
+        GW-->>User: ⛔ Blocked (Zero user data leaked)
+    else Risk Score 40 - 69 (Medium Anomaly: New Secondary Device)
+        Auth->>DB: Store pending 6-digit OTP challenge
+        Auth->>Primary: Push OTP verification code to Primary Device screen
+        Auth-->>GW: HTTP 200 (Action: STEP_UP_MFA, temp_token)
+        GW-->>User: 🟡 Prompt for 6-Digit Verification Code
+    else Risk Score 0 - 39 (Low Risk: Normal Baseline)
+        Auth->>DB: Issue active session (30-day expiry)
+        Auth->>CW: Increment AllowSessions metric
+        Auth-->>GW: HTTP 200 (Action: ALLOW, session_token)
+        GW-->>User: 🟢 Access Granted
+    end
 ```
 
 ---
 
 ## 🧠 7-Dimensional Behavioral ML Pipeline
 
-On every sign-in or session renewal attempt, the system computes a normalized 7-dimensional behavioral feature vector against the user's historical baseline:
+On every authentication attempt, incoming telemetry is transformed into a normalized 7-dimensional behavioral vector:
 
-| Feature Dimension | Extraction Method | Anomaly Condition | Risk Weight |
+$$\mathbf{x} = \begin{bmatrix} v_{\text{geo}}, & d_{\text{geo}}, & \Delta_{\text{device}}, & R_{\text{IP}}, & B_{\text{burst}}, & A_{\text{circadian}}, & S_{\text{bot}} \end{bmatrix}^T$$
+
+| Dimension | Formula / Feature Calculation | Anomaly Threshold | Weight |
 | :--- | :--- | :--- | :---: |
-| 🚀 `geo_velocity_kmh` | Haversine velocity between successive logins | $> 900\text{ km/h}$ (Impossible Travel) | **40%** |
-| 📍 `distance_km` | Physical geodetic displacement from baseline | $> 1,000\text{ km}$ intercontinental shift | **20%** |
-| 💻 `device_distance` | Canvas hash, WebGL render context, screen resolution | Unrecognized hardware canvas ($> 0.5$) | **15%** |
-| 🌐 `ip_reputation` | Tor exit node verification, datacenter & proxy checks | Known Tor exit / VPN datacenter ($= 1.0$) | **15%** |
-| ⚡ `failed_attempts_burst` | Sliding-window failed attempt velocity | $\ge 3\text{ failed attempts in 10 min}$ | **10%** |
-| ⏰ `circadian_anomaly` | Deviation from user's historical active hours | Off-hours access anomaly ($> 0.6$) | **5%** |
-| 🤖 `bot_signature` | Headless browser markers (`navigator.webdriver`) | Automated headless signature ($= 1.0$) | **5%** |
+| 🚀 `geo_velocity_kmh` | $v = \frac{2R \arcsin\left(\sqrt{\sin^2(\frac{\Delta\phi}{2}) + \cos\phi_1\cos\phi_2\sin^2(\frac{\Delta\lambda}{2})}\right)}{\Delta t}$ | $> 900\text{ km/h}$ (Impossible Travel) | **40%** |
+| 📍 `distance_km` | Great-circle Haversine geodetic distance from historical centroid | $> 1,000\text{ km}$ intercontinental shift | **20%** |
+| 💻 `device_distance` | Levenshtein / Normalized canvas & WebGL hash difference | Unrecognized hardware profile ($> 0.5$) | **15%** |
+| 🌐 `ip_reputation` | Tor exit node list match $\cup$ Datacenter ASN $\cup$ Proxy header | Verified Tor / Datacenter IP ($= 1.0$) | **15%** |
+| ⚡ `failed_attempts_burst` | Sliding-window failed password count over past 10 minutes | $\ge 3\text{ failed attempts}$ | **10%** |
+| ⏰ `circadian_anomaly` | $|\text{hour}_{\text{login}} - \mu_{\text{active}}| / \sigma_{\text{active}}$ | Unusual off-hours activity ($> 0.6$) | **5%** |
+| 🤖 `bot_signature` | `navigator.webdriver` presence, missing browser plugins | Automated headless signature ($= 1.0$) | **5%** |
 
-### Tri-Model Hybrid Inference
-
-```
-                                  [ Incoming Session Telemetry ]
-                                                │
-                                  ┌─────────────┴─────────────┐
-                                  ▼                           ▼
-                     ┌─────────────────────────┐ ┌─────────────────────────┐
-                     │ Scikit-Learn RF & IF    │ │ TensorFlow Autoencoder  │
-                     │  • Random Forest (0-1)  │ │  • 7-4-2-4-7 Bottleneck │
-                     │  • Isolation Forest     │ │  • MSE Loss Calculation │
-                     └────────────┬────────────┘ └────────────┬────────────┘
-                                  └─────────────┬─────────────┘
-                                                ▼
-                                   [ Calibrated Risk Score ]
-                                                │
-                 ┌──────────────────────────────┼──────────────────────────────┐
-                 ▼                              ▼                              ▼
-        Risk Score: 0 – 39             Risk Score: 40 – 69            Risk Score: 70 – 100
-           [ LOW RISK ]                  [ MEDIUM RISK ]                [ CRITICAL RISK ]
-```
-
-1. **Scikit-Learn Random Forest Classifier**: Evaluates supervised compromise probability ($0 - 100\%$) trained on historical penetration attack vectors.
-2. **Scikit-Learn Isolation Forest**: Detects unsupervised zero-day anomalies and unexpected behavioral shifts.
-3. **TensorFlow Deep Neural Autoencoder (7-4-2-4-7)**: Measures multi-variable reconstruction Mean Squared Error ($\text{MSE} > 0.12$) to catch complex, non-linear multi-variable anomalies.
-4. **Explainable AI (XAI)**: Generates human-readable attribution breakdown weights identifying the exact root-cause drivers behind every flagged attempt.
+### Tri-Model Hybrid Architecture
+1. **Scikit-Learn Random Forest Classifier:** Evaluates supervised compromise probability ($0 - 100\%$) trained on penetration testing telemetry.
+2. **Scikit-Learn Isolation Forest:** Identifies unsupervised zero-day anomalies and unrecognized attack vectors.
+3. **TensorFlow Deep Neural Autoencoder (7-4-2-4-7):** Computes reconstruction Mean Squared Error:
+   $$\text{MSE} = \frac{1}{7}\sum_{i=1}^{7} (x_i - \hat{x}_i)^2$$
+   An anomaly is flagged when $\text{MSE} > 0.12$.
+4. **Explainable AI (XAI):** Generates human-readable attribution breakdown weights, detailing the root-cause factors behind every decision.
 
 ---
 
@@ -186,7 +272,7 @@ A comprehensive security audit across both backend and frontend confirmed 100% r
 The platform provides dedicated enterprise administration via the `/api/cms/*` control plane:
 
 1. **Privileged Immunity:**
-   - Super Admin accounts (`likhithadm@gmail.com`) are immune to failed password rate-limiting and IP lockouts.
+   - Super Admin accounts (configured via `.env`) are immune to failed password rate-limiting and IP lockouts.
    - Bypasses geofencing and geographical location restrictions for emergency access.
 2. **Single-Device Session Governance:**
    - Super Admin accounts are restricted to **one active device at a time**.
@@ -216,7 +302,17 @@ cd aws-security
 pip install -r requirements.txt
 ```
 
-### 2. Launch the Application
+### 2. Configure Environment
+
+Copy `.env.example` to `.env` and set your preferred Super Admin credentials:
+
+```bash
+cp .env.example .env
+```
+
+*(Edit `.env` to configure your custom `SUPER_ADMIN_EMAIL` and `SUPER_ADMIN_PASSWORD`).*
+
+### 3. Launch the Application
 
 ```bash
 python run_standalone.py
@@ -230,7 +326,7 @@ Open **`http://127.0.0.1:8000`** in your browser.
 | **Local LAN** | `http://<YOUR_LOCAL_IP>:8000` | Testing across multiple phones and laptops on the same Wi-Fi. |
 | **Public HTTPS Tunnel** | Generated via Cloudflare Tunnel | Sharing live with remote reviewers without port forwarding. |
 
-### 3. Share Live Publicly (Cloudflare Quick Tunnel)
+### 4. Share Live Publicly (Cloudflare Quick Tunnel)
 
 To share the application over an encrypted HTTPS link with friends or team members without router configuration:
 
@@ -246,8 +342,8 @@ Cloudflare generates a secure temporary URL (e.g. `https://<subdomain>.trycloudf
 
 | Persona | Role | Email | Password | Baseline Location |
 | :--- | :--- | :--- | :--- | :--- |
-| **👑 Super Admin** | `SUPER_ADMIN` | `likhithadm@gmail.com` | `likitha@2005` | Anywhere (Immune) |
-| **🛡️ Demo Security Lead** | `ROOT_ADMIN` | `demo@awssecurity.io` | `MasterKey#2026` | New York, US |
+| **👑 Super Admin** | `SUPER_ADMIN` | Configured via `.env` (`SUPER_ADMIN_EMAIL`) | Configured via `.env` (`SUPER_ADMIN_PASSWORD`) | Anywhere (Immune) |
+| **🛡️ Demo Security Lead** | `ROOT_ADMIN` | `demo@awssecurity.io` | `AWSSecurity#2026` | New York, US |
 | **👤 Demo User** | `USER` | `demouser@mail.com` | `DemoUser.AWS@29` | New York, US |
 
 *(New user registration is fully supported on the portal with instant activation, password complexity validation, and interactive visibility toggling).*
@@ -310,7 +406,7 @@ python -m unittest tests/audit_and_bug_checker.py        # System health and aud
 
 ```
 aws-security-main/
-├── README.md                            # Comprehensive system documentation & visual guide
+├── README.md                            # Comprehensive reference guide & visual architecture
 ├── requirements.txt                     # Core dependencies (FastAPI, Scikit-Learn, PyMongo)
 ├── run_standalone.py                    # Zero-AWS local standalone emulator runner
 ├── cloudflared.exe                      # Cloudflare Quick Tunnel binary for instant HTTPS sharing

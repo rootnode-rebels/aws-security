@@ -607,7 +607,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 const SUPER_ADMIN_CONFIG = {
   // Super Admin email list (case-insensitive)
   emails: [
-    "likhithadm@gmail.com",
     "superadmin@awssecurity.io",
     ...(JSON.parse(localStorage.getItem("super_admin_emails") || "[]"))
   ],

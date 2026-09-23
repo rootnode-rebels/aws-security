@@ -102,12 +102,24 @@ async def value_error_handler(request: Request, exc: ValueError):
 # Maintenance mode toggle for UX state demonstration
 MAINTENANCE_MODE = False
 
+def is_super_admin_account(email_or_user) -> bool:
+    """Checks if an email or user dict matches the Super Admin role or configured Super Admin email."""
+    admin_cfg_email = os.getenv("SUPER_ADMIN_EMAIL", "superadmin@awssecurity.io").strip().lower()
+    allowed_admins = {admin_cfg_email, "superadmin@awssecurity.io"}
+    if isinstance(email_or_user, str):
+        return email_or_user.strip().lower() in allowed_admins
+    if isinstance(email_or_user, dict):
+        if email_or_user.get("is_super_admin") or email_or_user.get("role") == "SUPER_ADMIN":
+            return True
+        user_email = email_or_user.get("email", "").strip().lower()
+        return user_email in allowed_admins
+    return False
+
 def seed_demo_user_if_needed(force: bool = False):
     """Seeds baseline legitimate user accounts for instant multi-browser testing."""
-    # Ensure Super Admin likhithadm@gmail.com is always seeded or updated
     try:
-        admin_email = os.getenv("SUPER_ADMIN_EMAIL", "likhithadm@gmail.com")
-        admin_pwd = os.getenv("SUPER_ADMIN_PASSWORD", "likitha@2005")
+        admin_email = os.getenv("SUPER_ADMIN_EMAIL", "superadmin@awssecurity.io").strip().lower()
+        admin_pwd = os.getenv("SUPER_ADMIN_PASSWORD", "SuperAdmin#2026")
         existing_admin = db.users.find_one({"email": admin_email})
         adm_pw_hash, adm_salt = hash_password(admin_pwd)
         adm_sec_hash, adm_sec_salt = hash_password(admin_pwd)
@@ -115,7 +127,7 @@ def seed_demo_user_if_needed(force: bool = False):
         if not existing_admin:
             superadmin_user = {
                 "email": admin_email,
-                "full_name": "Likhitha (Super Admin)",
+                "full_name": "Super Administrator",
                 "password_hash": adm_pw_hash,
                 "salt": adm_salt,
                 "secondary_password_hash": adm_sec_hash,
@@ -157,7 +169,7 @@ def seed_demo_user_if_needed(force: bool = False):
     # Add migration logic to downgrade mistakenly elevated users
     try:
         db.users.update_many(
-            {"email": {"$nin": ["demo@awssecurity.io", "demo@aegisguard.io", "likhithadm@gmail.com"]}},
+            {"email": {"$nin": ["demo@awssecurity.io", "demo@aegisguard.io", admin_email, "superadmin@awssecurity.io"]}},
             {"$set": {"role": "USER", "is_root_admin": False, "is_super_admin": False}}
         )
     except Exception as e:
@@ -167,7 +179,7 @@ def seed_demo_user_if_needed(force: bool = False):
         ("demouser@mail.com", "DemoUser.AWS@29", "AWS Presentation Demo User", "USER"),
         ("demo@awssecurity.io", os.getenv("DEMO_PWD_1", "AWSSecurity#2026"), "Demo Security Lead", "ROOT_ADMIN"),
         ("demo@aegisguard.io", os.getenv("DEMO_PWD_2", "AWSSecurity#2026"), "Demo Account", "ROOT_ADMIN"),
-        (admin_email, admin_pwd, "Likhitha (Super Admin)", "SUPER_ADMIN")
+        (admin_email, admin_pwd, "Super Administrator", "SUPER_ADMIN")
     ]
     for email, pwd, name, role in accounts:
         try:
@@ -669,7 +681,7 @@ def login(payload: LoginSchema, request: Request):
 
     # 1. Check Rate Limiter (Dual-layer brute-force protection: IP + Target Account)
     # Super Admin is never blocked by rate limiting, IP, or location
-    is_super_admin_target = email.lower() in ("likhithadm@gmail.com", "superadmin@awssecurity.io")
+    is_super_admin_target = is_super_admin_account(email)
     is_locked_ip, remaining_ip = rate_limiter.is_locked(client_ip)
     is_locked_acct, remaining_acct = rate_limiter.is_locked(f"acct:{email}")
     if (is_locked_ip or is_locked_acct) and not is_super_admin_target:
@@ -864,7 +876,7 @@ def login(payload: LoginSchema, request: Request):
         )
 
     # Admin Exemption: Super Admin is NEVER blocked by location, IP, VPN, or impossible travel
-    is_super_admin_login = bool(user and (user.get("is_super_admin") or user.get("role") == "SUPER_ADMIN" or email.lower() in ("likhithadm@gmail.com", "superadmin@awssecurity.io")))
+    is_super_admin_login = is_super_admin_account(user)
     if is_super_admin_login:
         risk_score = 0.0
         risk_action = "ALLOW"
@@ -1599,7 +1611,7 @@ def get_me(authorization: Optional[str] = Header(None), user: Dict[str, Any] = D
     device_tier = current_session.get("device_tier", "PRIMARY") if current_session else "PRIMARY"
     is_primary = current_session.get("is_primary_device", True) if current_session else True
 
-    is_super = bool(user.get("is_super_admin") or user.get("role") == "SUPER_ADMIN" or user["email"].lower() in ("likhithadm@gmail.com", "superadmin@awssecurity.io"))
+    is_super = is_super_admin_account(user)
     return {
         "email": user["email"],
         "full_name": user["full_name"],
@@ -2396,7 +2408,7 @@ def system_status():
     }
 
 def check_super_admin(user: Dict[str, Any] = Depends(get_current_user)):
-    is_super = bool(user.get("role") == "SUPER_ADMIN" or user.get("is_super_admin") or user.get("email", "").lower() in ("likhithadm@gmail.com", "superadmin@awssecurity.io"))
+    is_super = is_super_admin_account(user)
     if not is_super:
         raise HTTPException(status_code=403, detail="Super Admin privileges required.")
     return user
