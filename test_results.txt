@@ -1,0 +1,988 @@
+C:\Users\LENOVO\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\sklearn\base.py:463: InconsistentVersionWarning: Trying to unpickle estimator StandardScaler from version 1.9.0 when using version 1.8.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+C:\Users\LENOVO\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\sklearn\base.py:463: InconsistentVersionWarning: Trying to unpickle estimator ExtraTreeRegressor from version 1.9.0 when using version 1.8.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+C:\Users\LENOVO\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\sklearn\base.py:463: InconsistentVersionWarning: Trying to unpickle estimator IsolationForest from version 1.9.0 when using version 1.8.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+C:\Users\LENOVO\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\sklearn\base.py:463: InconsistentVersionWarning: Trying to unpickle estimator DecisionTreeClassifier from version 1.9.0 when using version 1.8.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+C:\Users\LENOVO\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\sklearn\base.py:463: InconsistentVersionWarning: Trying to unpickle estimator RandomForestClassifier from version 1.9.0 when using version 1.8.0. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
+https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
+  warnings.warn(
+[ML Engine] Pre-trained behavioral models loaded successfully.
+C:\Users\LENOVO\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+[AWSSecurity] Verified Super Admin active: superadmin@awssecurity.io / [SECURED]
+.............F...F..........F......
+======================================================================
+FAIL: test_clear_endpoints_for_events_cloudwatch_and_notifications (test_notification_service.TestNotificationService.test_clear_endpoints_for_events_cloudwatch_and_notifications)
+Verify clear endpoints empty records and reset metrics.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\RootNode-Rebels\AWS Project\tests\test_notification_service.py", line 208, in test_clear_endpoints_for_events_cloudwatch_and_notifications
+    self.assertEqual(clear_notif.status_code, 200)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 401 != 200
+
+======================================================================
+FAIL: test_notification_status_and_engine_mode (test_notification_service.TestNotificationService.test_notification_status_and_engine_mode)
+Verify engine status keys and /api/security/dispatched-notifications metadata.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\RootNode-Rebels\AWS Project\tests\test_notification_service.py", line 197, in test_notification_status_and_engine_mode
+    self.assertEqual(res.status_code, 200)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 401 != 200
+
+======================================================================
+FAIL: test_03_maintenance_mode_and_root_admin_control (test_root_admin_demo_delete.TestRootAdminAndDemoDeletion.test_03_maintenance_mode_and_root_admin_control)
+Verify maintenance mode broadcasts status and requires Super Admin control.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\RootNode-Rebels\AWS Project\tests\test_root_admin_demo_delete.py", line 114, in test_03_maintenance_mode_and_root_admin_control
+    self.assertEqual(enable_res.status_code, 200)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 403 != 200
+
+----------------------------------------------------------------------
+Ran 35 tests in 32.669s
+
+FAILED (failures=3)
+[TEST] Database operations: PASSED
+[TEST] Password security & PBKDF2: PASSED
+[TEST] Rate limiter brute-force defense: PASSED
+[TEST] ML Risk Engine & Anomaly Detection: PASSED
+[TEST] Deep Autoencoder Neural Reconstruction: PASSED
+[TEST] CloudWatch Monitoring & Metrics: PASSED
+[TEST] Advanced Security Hardening (Anti-Injection & Dual Rate Limiting): PASSED
+[TEST] MongoDB Query Operators ($gt, $ne, $in): PASSED
+[TEST] Rate Limiter Memory Pruning & DoS Mitigation: PASSED
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: bg_notifier@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:22 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, Notifier Tester!
+   | 
+   | Your account (bg_notifier@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: bg_notifier@awssecurity.io
+   Type:      PRIMARY_DEVICE_ENROLLED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🛡️ [AWS Security] Primary Device Authority Enrolled: Primary Device
+   Timestamp: 2026-09-24 14:13:23 UTC
+----------------------------------------------------------------------------
+   | Primary Authority Transfer Notice:
+   | 
+   | Your account (bg_notifier@awssecurity.io) has designated a new Primary Security Portal:
+   |   Device: Primary Device
+   |   IP:     testclient
+   |   Time:   2026-09-24 14:13:23 UTC
+   | 
+   | All remote secondary devices will require approval from this device to access your account.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: bg_notifier@awssecurity.io
+   Type:      MFA_VERIFICATION_CODE
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🔑 [AWS Security] Sign-In Verification Code: 249938
+   Timestamp: 2026-09-24 14:13:23 UTC
+----------------------------------------------------------------------------
+   | Verification Code: 249938
+   | 
+   | A sign-in attempt for bg_notifier@awssecurity.io requires identity verification.
+   | Device:   Firefox on Linux
+   | Location: New York, United States
+   | IP:       testclient
+   | 
+   | Enter this 6-digit code to complete authentication. Code expires in 10 minutes.
+   | Do NOT share this code with anyone.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:24 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, SNS Tester!
+   | 
+   | Your account (sns_tester@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      PASSWORD_CHANGED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🛡️ [AWS Security] Master Password Updated
+   Timestamp: 2026-09-24 14:13:25 UTC
+----------------------------------------------------------------------------
+   | Security Notice:
+   | 
+   | The password for your account (sns_tester@awssecurity.io) was successfully changed from IP: testclient.
+   | 
+   | As a security precaution, all remote secondary sessions have been revoked.
+   | Timestamp: 2026-09-24 14:13:25 UTC
+   | 
+   | If this change was not made by you, please trigger an Emergency Account Freeze immediately.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:26 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, SNS Tester!
+   | 
+   | Your account (sns_tester@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:26 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, SNS Tester!
+   | 
+   | Your account (sns_tester@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      PASSWORD_RESET_TOKEN
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🔐 [AWS Security] Password Reset Recovery Token
+   Timestamp: 2026-09-24 14:13:27 UTC
+----------------------------------------------------------------------------
+   | Hello,
+   | 
+   | A password reset request was initiated for your AWS Security account (sns_tester@awssecurity.io) from IP: testclient.
+   | 
+   | Your single-use recovery token is:
+   | 
+   |     s-L1oJy28Cte1m1TdFEeVXoZ5fiX4hQRaPD-gA5RttA
+   | 
+   | This token is valid for 15 minutes. Use it on the login screen by clicking 'Forgot Password' -> 'Enter Recovery Token'.
+   | 
+   | ... [Full text viewable in Dispatched Notifications Drawer]
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:28 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, SNS Tester!
+   | 
+   | Your account (sns_tester@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      ACCOUNT_STATUS_CHANGE
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   ⚠️ [AWS Security] Emergency Account Freeze Activated
+   Timestamp: 2026-09-24 14:13:28 UTC
+----------------------------------------------------------------------------
+   | Account Status Notice:
+   | 
+   | Your AWS Security account (sns_tester@awssecurity.io) was frozen and all remote secondary sessions were killed from IP: testclient.
+   | Timestamp: 2026-09-24 14:13:28 UTC
+   | 
+   | Action was authorized by the Primary Security Portal.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:29 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, SNS Tester!
+   | 
+   | Your account (sns_tester@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      PASSWORD_RESET_TOKEN
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🔐 [AWS Security] Password Reset Recovery Token
+   Timestamp: 2026-09-24 14:13:29 UTC
+----------------------------------------------------------------------------
+   | Hello,
+   | 
+   | A password reset request was initiated for your AWS Security account (sns_tester@awssecurity.io) from IP: testclient.
+   | 
+   | Your single-use recovery token is:
+   | 
+   |     mNqZp4IDmiLC7vLAOy41ONtSupuss4NzJyO7ix44Tkw
+   | 
+   | This token is valid for 15 minutes. Use it on the login screen by clicking 'Forgot Password' -> 'Enter Recovery Token'.
+   | 
+   | ... [Full text viewable in Dispatched Notifications Drawer]
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:29 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, SNS Tester!
+   | 
+   | Your account (sns_tester@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:30 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, SNS Tester!
+   | 
+   | Your account (sns_tester@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:30 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, SNS Tester!
+   | 
+   | Your account (sns_tester@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      SECONDARY_PASSWORD_ROTATED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🛡️ [AWS Security] Master Secondary Password Updated
+   Timestamp: 2026-09-24 14:13:31 UTC
+----------------------------------------------------------------------------
+   | Security Notice:
+   | 
+   | The Master Secondary Security Password for sns_tester@awssecurity.io was updated from IP: testclient.
+   | Timestamp: 2026-09-24 14:13:31 UTC
+   | 
+   | This secondary credential controls Primary Device authority transfers and recovery.
+   | If this change was not made by you, activate Emergency Account Freeze immediately.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:32 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, SNS Tester!
+   | 
+   | Your account (sns_tester@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sns_tester@awssecurity.io
+   Type:      THREAT_BLOCKED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🚨 [CRITICAL ALERT] Unauthorized Access Blocked (100/100 Risk)
+   Timestamp: 2026-09-24 14:13:32 UTC
+----------------------------------------------------------------------------
+   | 🚨 EMERGENCY SECURITY ALERT: Unauthorized sign-in attempt BLOCKED.
+   | 
+   | Target Account: sns_tester@awssecurity.io
+   | Risk Score:     100.0 / 100 (HIGH SEVERITY)
+   | Origin:         Tokyo, Japan (IP: 133.242.18.5)
+   | Threat Factors:
+   |   - Impossible Travel Detected: Travel velocity of 40,191,603 km/h over 10,852 km exceeds commercial flight speed.
+   |   - Datacenter / Commercial VPN IP: Connection originated from an automated hosting facility.
+   |   - Completely Unrecognized Device: Hardware canvas, OS, and screen signature diverge from user history.
+   | 
+   | ... [Full text viewable in Dispatched Notifications Drawer]
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:33 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, Primary Device Owner!
+   | 
+   | Your account (tester_primary_mfa@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      PRIMARY_DEVICE_ENROLLED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🛡️ [AWS Security] Primary Device Authority Enrolled: Primary Security Portal (Desktop Chrome)
+   Timestamp: 2026-09-24 14:13:34 UTC
+----------------------------------------------------------------------------
+   | Primary Authority Transfer Notice:
+   | 
+   | Your account (tester_primary_mfa@awssecurity.io) has designated a new Primary Security Portal:
+   |   Device: Primary Security Portal (Desktop Chrome)
+   |   IP:     testclient
+   |   Time:   2026-09-24 14:13:34 UTC
+   | 
+   | All remote secondary devices will require approval from this device to access your account.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      ACCOUNT_STATUS_CHANGE
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   ⚠️ [AWS Security] Emergency Account Freeze Activated
+   Timestamp: 2026-09-24 14:13:34 UTC
+----------------------------------------------------------------------------
+   | Account Status Notice:
+   | 
+   | Your AWS Security account (tester_primary_mfa@awssecurity.io) was frozen and all remote secondary sessions were killed from IP: testclient.
+   | Timestamp: 2026-09-24 14:13:34 UTC
+   | 
+   | Action was authorized by the Primary Security Portal.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      ACCOUNT_STATUS_CHANGE
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   ✅ [AWS Security] Account Restored to Active Status
+   Timestamp: 2026-09-24 14:13:34 UTC
+----------------------------------------------------------------------------
+   | Account Status Notice:
+   | 
+   | Your AWS Security account (tester_primary_mfa@awssecurity.io) was unfrozen and restored to ACTIVE status from IP: testclient.
+   | Timestamp: 2026-09-24 14:13:34 UTC
+   | 
+   | Action was authorized by the Primary Security Portal.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:35 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, Primary Device Owner!
+   | 
+   | Your account (tester_primary_mfa@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      PRIMARY_DEVICE_ENROLLED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🛡️ [AWS Security] Primary Device Authority Enrolled: Primary Security Portal (Desktop Chrome)
+   Timestamp: 2026-09-24 14:13:35 UTC
+----------------------------------------------------------------------------
+   | Primary Authority Transfer Notice:
+   | 
+   | Your account (tester_primary_mfa@awssecurity.io) has designated a new Primary Security Portal:
+   |   Device: Primary Security Portal (Desktop Chrome)
+   |   IP:     testclient
+   |   Time:   2026-09-24 14:13:35 UTC
+   | 
+   | All remote secondary devices will require approval from this device to access your account.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      MFA_VERIFICATION_CODE
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🔑 [AWS Security] Sign-In Verification Code: 324641
+   Timestamp: 2026-09-24 14:13:36 UTC
+----------------------------------------------------------------------------
+   | Verification Code: 324641
+   | 
+   | A sign-in attempt for tester_primary_mfa@awssecurity.io requires identity verification.
+   | Device:   Firefox on Windows NT 10.0
+   | Location: New York, US
+   | IP:       testclient
+   | 
+   | Enter this 6-digit code to complete authentication. Code expires in 10 minutes.
+   | Do NOT share this code with anyone.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      SECONDARY_DEVICE_LOGIN
+   Channel:   Main Device In-App Inbox (Routine)
+   Subject:   ℹ️ [AWS Security] Secondary Device Signed In: Secondary Device (Firefox on Windows NT 10.0)
+   Timestamp: 2026-09-24 14:13:36 UTC
+----------------------------------------------------------------------------
+   | Secondary Device Access Granted:
+   | 
+   | Account: tester_primary_mfa@awssecurity.io
+   | Device:  Secondary Device (Firefox on Windows NT 10.0)
+   | IP:      127.0.0.1
+   | Time:    2026-09-24 14:13:36 UTC
+   | 
+   | A secondary session was authenticated using the verification code displayed on your Primary Device.
+   | If you did not authorize this, freeze your account immediately from your Primary Security Portal.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:37 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, Primary Device Owner!
+   | 
+   | Your account (tester_primary_mfa@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      PRIMARY_DEVICE_ENROLLED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🛡️ [AWS Security] Primary Device Authority Enrolled: Primary Security Portal (Desktop Chrome)
+   Timestamp: 2026-09-24 14:13:37 UTC
+----------------------------------------------------------------------------
+   | Primary Authority Transfer Notice:
+   | 
+   | Your account (tester_primary_mfa@awssecurity.io) has designated a new Primary Security Portal:
+   |   Device: Primary Security Portal (Desktop Chrome)
+   |   IP:     testclient
+   |   Time:   2026-09-24 14:13:37 UTC
+   | 
+   | All remote secondary devices will require approval from this device to access your account.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      MFA_VERIFICATION_CODE
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🔑 [AWS Security] Sign-In Verification Code: 447519
+   Timestamp: 2026-09-24 14:13:38 UTC
+----------------------------------------------------------------------------
+   | Verification Code: 447519
+   | 
+   | A sign-in attempt for tester_primary_mfa@awssecurity.io requires identity verification.
+   | Device:   Edge on Windows NT 10.0
+   | Location: New York, US
+   | IP:       testclient
+   | 
+   | Enter this 6-digit code to complete authentication. Code expires in 10 minutes.
+   | Do NOT share this code with anyone.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:39 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, Primary Device Owner!
+   | 
+   | Your account (tester_primary_mfa@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      PRIMARY_DEVICE_ENROLLED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🛡️ [AWS Security] Primary Device Authority Enrolled: Primary Security Portal (Desktop Chrome)
+   Timestamp: 2026-09-24 14:13:40 UTC
+----------------------------------------------------------------------------
+   | Primary Authority Transfer Notice:
+   | 
+   | Your account (tester_primary_mfa@awssecurity.io) has designated a new Primary Security Portal:
+   |   Device: Primary Security Portal (Desktop Chrome)
+   |   IP:     testclient
+   |   Time:   2026-09-24 14:13:40 UTC
+   | 
+   | All remote secondary devices will require approval from this device to access your account.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      MFA_VERIFICATION_CODE
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🔑 [AWS Security] Sign-In Verification Code: 788969
+   Timestamp: 2026-09-24 14:13:40 UTC
+----------------------------------------------------------------------------
+   | Verification Code: 788969
+   | 
+   | A sign-in attempt for tester_primary_mfa@awssecurity.io requires identity verification.
+   | Device:   Mobile Safari on iOS 17
+   | Location: New York, US
+   | IP:       testclient
+   | 
+   | Enter this 6-digit code to complete authentication. Code expires in 10 minutes.
+   | Do NOT share this code with anyone.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      PRIMARY_DEVICE_ENROLLED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🛡️ [AWS Security] Primary Device Authority Enrolled: New Promoted Primary Device
+   Timestamp: 2026-09-24 14:13:42 UTC
+----------------------------------------------------------------------------
+   | Primary Authority Transfer Notice:
+   | 
+   | Your account (tester_primary_mfa@awssecurity.io) has designated a new Primary Security Portal:
+   |   Device: New Promoted Primary Device
+   |   IP:     testclient
+   |   Time:   2026-09-24 14:13:42 UTC
+   | 
+   | All remote secondary devices will require approval from this device to access your account.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:42 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, Primary Device Owner!
+   | 
+   | Your account (tester_primary_mfa@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      PRIMARY_DEVICE_ENROLLED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🛡️ [AWS Security] Primary Device Authority Enrolled: Primary Security Portal (Desktop Chrome)
+   Timestamp: 2026-09-24 14:13:43 UTC
+----------------------------------------------------------------------------
+   | Primary Authority Transfer Notice:
+   | 
+   | Your account (tester_primary_mfa@awssecurity.io) has designated a new Primary Security Portal:
+   |   Device: Primary Security Portal (Desktop Chrome)
+   |   IP:     testclient
+   |   Time:   2026-09-24 14:13:43 UTC
+   | 
+   | All remote secondary devices will require approval from this device to access your account.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      SECONDARY_PASSWORD_ROTATED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🛡️ [AWS Security] Master Secondary Password Updated
+   Timestamp: 2026-09-24 14:13:44 UTC
+----------------------------------------------------------------------------
+   | Security Notice:
+   | 
+   | The Master Secondary Security Password for tester_primary_mfa@awssecurity.io was updated from IP: testclient.
+   | Timestamp: 2026-09-24 14:13:44 UTC
+   | 
+   | This secondary credential controls Primary Device authority transfers and recovery.
+   | If this change was not made by you, activate Emergency Account Freeze immediately.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: tester_primary_mfa@awssecurity.io
+   Type:      PRIMARY_DEVICE_ENROLLED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🛡️ [AWS Security] Primary Device Authority Enrolled: Testing New Secondary Pwd
+   Timestamp: 2026-09-24 14:13:45 UTC
+----------------------------------------------------------------------------
+   | Primary Authority Transfer Notice:
+   | 
+   | Your account (tester_primary_mfa@awssecurity.io) has designated a new Primary Security Portal:
+   |   Device: Testing New Secondary Pwd
+   |   IP:     testclient
+   |   Time:   2026-09-24 14:13:45 UTC
+   | 
+   | All remote secondary devices will require approval from this device to access your account.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: sec_user_1790259225659@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:46 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, Security Analyst!
+   | 
+   | Your account (sec_user_1790259225659@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+[AWSSecurity] Verified Super Admin active: superadmin@awssecurity.io / [SECURED]
+[AWSSecurity] Seeded default account: demo@awssecurity.io
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: shivu_test@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:49 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, Shivu Tester!
+   | 
+   | Your account (shivu_test@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: shivu_test@awssecurity.io
+   Type:      PRIMARY_DEVICE_ENROLLED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🛡️ [AWS Security] Primary Device Authority Enrolled: Main Device (Chrome on Windows NT 10.0)
+   Timestamp: 2026-09-24 14:13:50 UTC
+----------------------------------------------------------------------------
+   | Primary Authority Transfer Notice:
+   | 
+   | Your account (shivu_test@awssecurity.io) has designated a new Primary Security Portal:
+   |   Device: Main Device (Chrome on Windows NT 10.0)
+   |   IP:     testclient
+   |   Time:   2026-09-24 14:13:50 UTC
+   | 
+   | All remote secondary devices will require approval from this device to access your account.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: shivu_test@awssecurity.io
+   Type:      MFA_VERIFICATION_CODE
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🔑 [AWS Security] Sign-In Verification Code: 157016
+   Timestamp: 2026-09-24 14:13:51 UTC
+----------------------------------------------------------------------------
+   | Verification Code: 157016
+   | 
+   | A sign-in attempt for shivu_test@awssecurity.io requires identity verification.
+   | Device:   Firefox on Ubuntu Linux
+   | Location: New York, United States
+   | IP:       testclient
+   | 
+   | Enter this 6-digit code to complete authentication. Code expires in 10 minutes.
+   | Do NOT share this code with anyone.
+============================================================================
+
+[TEST] One-Click allowance, Keep This Device Main option, and Zero Primary Data Leakage tests all PASSED!
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: travel_tester_1790259231402@awssecurity.io
+   Type:      ACCOUNT_REGISTERED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🎉 [AWS Security] Account Registered & Defense Policies Active
+   Timestamp: 2026-09-24 14:13:52 UTC
+----------------------------------------------------------------------------
+   | Welcome to AWS Security Defense, Travel Test User!
+   | 
+   | Your account (travel_tester_1790259231402@awssecurity.io) has been successfully enrolled from IP: testclient.
+   | 
+   | Active Protections:
+   |   - Real-time ML Anomaly Detection & Impossible Travel Prevention
+   |   - Amazon SNS Emergency Alert Routing
+   |   - Primary Device Authority & Zero-Data-Leak Architecture
+   | 
+   | If you did not initiate this registration, please contact security incident response.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: travel_tester_1790259231402@awssecurity.io
+   Type:      PRIMARY_DEVICE_ENROLLED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🛡️ [AWS Security] Primary Device Authority Enrolled: Primary Security Portal (Chrome on Windows NT 10.0)
+   Timestamp: 2026-09-24 14:13:52 UTC
+----------------------------------------------------------------------------
+   | Primary Authority Transfer Notice:
+   | 
+   | Your account (travel_tester_1790259231402@awssecurity.io) has designated a new Primary Security Portal:
+   |   Device: Primary Security Portal (Chrome on Windows NT 10.0)
+   |   IP:     testclient
+   |   Time:   2026-09-24 14:13:52 UTC
+   | 
+   | All remote secondary devices will require approval from this device to access your account.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: travel_tester_1790259231402@awssecurity.io
+   Type:      MFA_VERIFICATION_CODE
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🔑 [AWS Security] Sign-In Verification Code: 388986
+   Timestamp: 2026-09-24 14:13:52 UTC
+----------------------------------------------------------------------------
+   | Verification Code: 388986
+   | 
+   | A sign-in attempt for travel_tester_1790259231402@awssecurity.io requires identity verification.
+   | Device:   Firefox on Ubuntu Linux
+   | Location: Philadelphia, US
+   | IP:       198.51.100.42
+   | 
+   | Enter this 6-digit code to complete authentication. Code expires in 10 minutes.
+   | Do NOT share this code with anyone.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: travel_tester_1790259231402@awssecurity.io
+   Type:      SECONDARY_DEVICE_LOGIN
+   Channel:   Main Device In-App Inbox (Routine)
+   Subject:   ℹ️ [AWS Security] Secondary Device Signed In: Challenged Device (Firefox on Ubuntu Linux)
+   Timestamp: 2026-09-24 14:13:53 UTC
+----------------------------------------------------------------------------
+   | Secondary Device Access Granted:
+   | 
+   | Account: travel_tester_1790259231402@awssecurity.io
+   | Device:  Challenged Device (Firefox on Ubuntu Linux)
+   | IP:      198.51.100.42
+   | Time:    2026-09-24 14:13:53 UTC
+   | 
+   | A secondary session was authenticated using the verification code displayed on your Primary Device.
+   | If you did not authorize this, freeze your account immediately from your Primary Security Portal.
+============================================================================
+
+
+============================================================================
+[AMAZON SNS / EMAIL DISPATCHER] -> STATUS: DELIVERED
+   Recipient: travel_tester_1790259231402@awssecurity.io
+   Type:      THREAT_BLOCKED
+   Channel:   Amazon SNS / Email (Local Emulation)
+   Subject:   🚨 [CRITICAL ALERT] Unauthorized Access Blocked (100/100 Risk)
+   Timestamp: 2026-09-24 14:13:53 UTC
+----------------------------------------------------------------------------
+   | 🚨 EMERGENCY SECURITY ALERT: Unauthorized sign-in attempt BLOCKED.
+   | 
+   | Target Account: travel_tester_1790259231402@awssecurity.io
+   | Risk Score:     100.0 / 100 (HIGH SEVERITY)
+   | Origin:         Tokyo, Japan (IP: 133.242.18.5)
+   | Threat Factors:
+   |   - Impossible Travel Detected: Travel velocity of 40,301,549 km/h over 10,881 km exceeds commercial flight speed.
+   |   - Datacenter / Commercial VPN IP: Connection originated from an automated hosting facility.
+   |   - Completely Unrecognized Device: Hardware canvas, OS, and screen signature diverge from user history.
+   | 
+   | ... [Full text viewable in Dispatched Notifications Drawer]
+============================================================================
+

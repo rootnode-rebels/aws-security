@@ -1,0 +1,131 @@
+﻿AWSSecurity AI ΓÇö Project Audit Report
+Comprehensive Code, UI, Docker & AWS Infrastructure Review
+Date: September 19, 2026  |  Branch: main  |  Commit: 053b3db  |  Team: RootNode-Rebels
+1. Executive Summary
+This document presents the results of a full technical audit conducted on the AWSSecurity AI project. The audit covers all layers of the system: frontend UI, backend Python services, AWS Lambda functions, Docker configuration, SAM CloudFormation template, database management, ML engine, and test coverage. The project is in a strong foundation with robust security controls, but several issues were identified that require immediate attention before production deployment.
+2. Project Structure Overview
+3. Critical Issues ≡ƒö┤
+The following issues must be resolved before any production deployment.
+Issue #1 ΓÇö Hardcoded Admin Credentials in Source Code
+Issue #2 ΓÇö AWS Notification Spam (Root Cause of Alert Overload)
+Issue #3 ΓÇö Docker Port Mismatch Between Dockerfile and docker-compose.yml
+4. Warnings ΓÜá∩╕Å
+These are non-critical but should be addressed before production.
+5. Security Controls Audit
+The following security controls were verified as correctly implemented.
+6. Docker & AWS Infrastructure Audit
+7. Frontend UI Audit
+8. Test Suite Coverage
+9. Recommended Action Plan
+10. Project Strengths
+Γ£à PBKDF2-SHA256 password hashing with 200,000 iterations ΓÇö industry standard.
+Γ£à OWASP top security headers applied on every HTTP response.
+Γ£à Comprehensive input sanitization: XSS, NoSQL injection, prototype pollution all blocked.
+Γ£à Sliding-window rate limiter with brute-force lockout and DoS protection (10,000 IP cap).
+Γ£à MongoDB + local JSON fallback ΓÇö runs completely offline with zero AWS dependencies.
+Γ£à Multi-stage Dockerfile minimizes image size and attack surface.
+Γ£à Pre-trained ML risk engine: Random Forest + Isolation Forest + TensorFlow Autoencoder.
+Γ£à Real-time SSE notification delivery via in-memory pub/sub broadcaster.
+Γ£à Full accessibility: ARIA roles, skip links, keyboard navigation in frontend.
+Γ£à 10 comprehensive test files covering all major flows including attack simulations.
+Γ£à Liquid glass animated UI with dark mode, Google Fonts, and responsive layout.
+Prepared by: Antigravity AI Assistant  |  Team: RootNode-Rebels  |  Confidential ΓÇö Internal Use Only
+Layer | Files | Total Size | Status
+Frontend (HTML/CSS/JS) | 13 files | ~314 KB | Γ£à Good
+Backend Python (FastAPI) | 10 files | ~180 KB | Γ£à Good
+AWS Lambda Functions | 4 files | ~9 KB | ΓÜá∩╕Å Stub issue
+Docker & Compose | 2 files | ~1.7 KB | ΓÜá∩╕Å Port mismatch
+Database Manager | 2 files | ~14 KB | Γ£à Good
+ML Engine + Model | 5 files + 1.37 MB | ~1.4 MB | Γ£à Good
+AWS SAM Template | 1 file | ~5 KB | Γ£à Good
+Test Suite | 10 files | ~90 KB | Γ£à Comprehensive
+Property | Detail
+Severity | ≡ƒö┤ CRITICAL
+File | backend/app.py ΓÇö Lines 98ΓÇô165
+Description | The Super Admin email (likhithadm@gmail.com) and password (likitha@2005) are hardcoded directly inside app.py. This means anyone with repository access can see the admin login credentials.
+Risk | Full account takeover if repo is ever made public or shared. Credential exposure in Git history.
+Fix | Move credentials to a .env file. Use os.getenv('SUPER_ADMIN_EMAIL') and os.getenv('SUPER_ADMIN_PASSWORD'). Add .env to .gitignore.
+Effort | 30 minutes
+Property | Detail
+Severity | ≡ƒö┤ CRITICAL (UX + Cost)
+Files | aws/template.yaml (Line 130), backend/security/notification_service.py
+Description | The CloudWatch Alarm HighRiskRateAlarm triggers SNS when >= 3 BLOCK_SESSION events occur in a 5-minute window. Every attack simulation, test run, or login from a new device can trigger this. The notification_service.py then sends: SNS email, In-App alert, Desktop toast, and CloudWatch log ΓÇö all for EVERY single event with no deduplication or cooldown.
+Risk | Alert fatigue (team ignores real alerts). SNS/SES cost spikes. Notification storms during demos.
+Fix 1 | Raise alarm threshold in template.yaml from 3 to 10+ for production.
+Fix 2 | Add a per-user cooldown in notification_service.py (e.g., max 1 alert/type/5 minutes).
+Fix 3 | Use SNS filter policies to route only HIGH severity alerts to email.
+Effort | 1-2 hours
+Property | Detail
+Severity | ≡ƒö┤ CRITICAL (Deployment)
+File | Dockerfile (Line 27) vs docker-compose.yml (Line 10)
+Description | Dockerfile sets ENV PORT=80 and EXPOSE 80, but docker-compose.yml maps port 8000:8000. This means the app inside the container starts on port 80, but Docker maps external 8000 to internal 8000 ΓÇö so no traffic reaches the app.
+Risk | Container deployment fails silently. Health checks fail. App is unreachable.
+Fix | Choose one port. Recommended: set PORT=8000 in Dockerfile, and keep compose as 8000:8000.
+Effort | 10 minutes
+# | Issue | File | Risk | Fix
+W1 | Lambda auth_handler.py is a stub ΓÇö returns hardcoded ALLOW with fake token, not connected to real DB or auth logic. | aws/lambdas/auth_handler.py | Security bypass in serverless mode | Wire to actual auth logic or document as demo-only
+W2 | CloudWatch service uses the same counter for both HighRiskRateAlarm and BruteForceBurstAlarm. Both alarms evaluate identical data. | backend/monitoring/cloudwatch_service.py (Lines 83, 93) | Redundant alarms, misleading telemetry | Separate counters: HighRiskDetections vs BruteForceBlocks
+W3 | data/db.json has grown to 190 KB. Without pruning, this will keep growing and slow down local reads/writes. | data/db.json | Performance degradation over time | Add TTL-based log pruning for cloudwatch_logs and security_events collections
+W4 | No .env file or .env.example is present. Notification service requires SMTP_HOST, SMTP_USER, etc. but has no template for new team members. | Root directory | Onboarding friction, silent config failures | Create .env.example with all required variables documented
+W5 | SNS alarm threshold (Threshold: 3) is appropriate for testing but too sensitive for production. 3 blocks in 5 minutes will happen during any demo. | aws/template.yaml (Line 130) | Constant false-positive alerts | Set to 10-15 for staging, 25+ for production
+W6 | Duplicate skip-link <a href='#main-content'> appears twice in index.html (Lines 22 and 43). | frontend/index.html | Accessibility issue / redundant DOM | Remove the duplicate skip link
+Control | Implementation | Standard | Status
+Password Hashing | PBKDF2-HMAC-SHA256 with 200,000 iterations + random salt per user | OWASP / NIST | Γ£à Pass
+Constant-Time Comparison | hmac.compare_digest() for password verification | OWASP | Γ£à Pass
+Session Tokens | secrets.token_urlsafe(32) ΓÇö 256-bit entropy | OWASP | Γ£à Pass
+Brute Force Protection | 5 attempts / 600s window ΓåÆ 900s lockout. Max 10,000 tracked IPs. | OWASP A07 | Γ£à Pass
+Input Sanitization | HTML escape, null byte removal, NoSQL operator blocking ($-prefix keys) | OWASP A03 | Γ£à Pass
+Prototype Pollution Guard | Blocks __proto__, constructor, prototype keys in all dict inputs | CWE-1321 | Γ£à Pass
+OWASP Security Headers | X-Frame-Options, X-XSS-Protection, CSP, Referrer-Policy, Permissions-Policy | OWASP A05 | Γ£à Pass
+CORS Policy | Credentials-aware CORS with regex origin validation | W3C | Γ£à Pass
+Generic Auth Errors | Login failure returns same message regardless of reason | OWASP A07 | Γ£à Pass
+Hardcoded Credentials | Admin password in source code | OWASP A07 | Γ¥î FAIL ΓÇö Fix Required
+Item | Configuration | Status | Notes
+Base Image | python:3.11-slim (multi-stage) | Γ£à Good | Minimal attack surface
+Build Strategy | Multi-stage ΓÇö builder + final | Γ£à Good | Reduces image size
+Healthcheck | curl -f http://localhost:80/api/system/status | ΓÜá∩╕Å Port mismatch | Should be port 8000
+Docker port (Dockerfile) | ENV PORT=80, EXPOSE 80 | Γ¥î Conflict | Conflicts with compose 8000:8000
+Docker port (Compose) | 8000:8000 | ΓÜá∩╕Å Mismatch | App inside container on 80
+MongoDB | mongo:7.0, named volume mongo_data | Γ£à Good | Persistent data
+Restart policy | unless-stopped | Γ£à Good | Auto-restarts on crash
+SAM Template | 3 Lambdas + API Gateway + SNS + CloudWatch Alarm | Γ£à Good | Properly parameterized
+SAM CORS | AllowOrigin: '*' | ΓÜá∩╕Å Warning | Restrict to your domain in prod
+SNS Alarm Threshold | 3 events / 5 minutes | ΓÜá∩╕Å Too low | Raises too often in demos/tests
+Lambda Memory | 512 MB default, 1024 MB for Risk Engine | Γ£à Good | Appropriate allocation
+Log Retention | 30 days (CloudWatch Log Group) | Γ£à Good | Cost-appropriate
+Component | File | Size | Status | Notes
+Main SPA HTML | index.html | 132 KB / 2177 lines | Γ£à Good | SEO, OG tags, ARIA roles present
+Global Stylesheet | css/style.css | 78 KB | Γ£à Good | Dark theme, CSS variables, responsive
+Core Router | js/app.js | 31 KB | Γ£à Good | Tab routing + state management
+User Portal | js/user_portal.js | 83 KB | Γ£à Good | Largest JS file ΓÇö main dashboard
+SOC Dashboard | js/soc_dashboard.js | 22 KB | Γ£à Good | Blue team defense view
+Attack Simulator | js/attack_simulator.js | 4.9 KB | Γ£à Good | Red team scenarios
+CloudWatch View | js/cloudwatch_view.js | 5.5 KB | Γ£à Good | Metrics + alarm widget
+CMS Dashboard | js/cms_dashboard.js | 8.8 KB | Γ£à Good | Admin content management
+Background Animation | js/bg_animation.js | 13 KB | Γ£à Good | Liquid glass canvas
+Device Fingerprint | js/fingerprint.js | 4.1 KB | Γ£à Good | Browser ID generation
+Legal Views | js/legal_views.js | 6.8 KB | Γ£à Good | Terms + Privacy pages
+Timer Worker | js/timer_worker.js | 504 B | Γ£à Good | Web Worker for session timer
+Duplicate skip-link | index.html Lines 22 + 43 | ΓÇö | ΓÜá∩╕Å Minor | Remove duplicate <a> tag
+Test File | Lines | Coverage Area | Status
+test_backend.py | ~300 | Core API endpoints (login, register, sessions) | Γ£à
+test_notification_service.py | ~320 | Alert dispatch ΓÇö SNS, email, in-app | Γ£à
+test_background_notifications.py | ~140 | Background alert polling loops | Γ£à
+test_live_scenario.py | ~340 | End-to-end live attack + defense flows | Γ£à
+test_primary_and_mfa.py | ~390 | MFA verification and primary device logic | Γ£à
+test_primary_device_flow.py | ~380 | Device enrollment and session governance | Γ£à
+test_root_admin_demo_delete.py | ~180 | Super Admin + demo account deletion flows | Γ£à
+test_user_reported_fixes.py | ~210 | Regression fixes from user-reported bugs | Γ£à
+test_vpn_impossible_travel_flow.py | ~290 | VPN detection + impossible travel attacks | Γ£à
+audit_and_bug_checker.py | ~240 | Static code audit + known bug checks | Γ£à
+Priority | Action | Owner | Effort | Timeline
+≡ƒö┤ P1 | Move hardcoded admin credentials to .env file | Backend Dev | 30 min | Immediate
+≡ƒö┤ P1 | Fix Docker port mismatch (Dockerfile PORT=80 vs Compose 8000) | DevOps | 10 min | Immediate
+≡ƒö┤ P1 | Add notification cooldown (1 alert/type/5min per user) | Backend Dev | 1-2 hrs | This sprint
+≡ƒƒí P2 | Raise CloudWatch alarm threshold from 3 ΓåÆ 10+ in template.yaml | DevOps | 5 min | This sprint
+≡ƒƒí P2 | Fix duplicate skip-link in index.html (Line 43) | Frontend Dev | 5 min | This sprint
+≡ƒƒí P2 | Separate HighRisk vs BruteForce counters in cloudwatch_service.py | Backend Dev | 1 hr | Next sprint
+≡ƒƒí P2 | Wire Lambda auth_handler.py to real auth logic | Backend Dev | 2-3 hrs | Next sprint
+≡ƒƒó P3 | Add TTL pruning for cloudwatch_logs and security_events in db.json | Backend Dev | 1 hr | Next sprint
+≡ƒƒó P3 | Create .env.example with all required variables | Any | 30 min | Next sprint
+≡ƒƒó P3 | Restrict SAM CORS AllowOrigin from * to your production domain | DevOps | 10 min | Before prod
