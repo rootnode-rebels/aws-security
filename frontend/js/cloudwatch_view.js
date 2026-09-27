@@ -41,10 +41,11 @@ async function loadCloudWatchTelemetry() {
     const alarmsContainer = document.getElementById("cw-alarms-container");
     if (alarmsContainer && data.alarms) {
       alarmsContainer.innerHTML = data.alarms.map(a => `
-        <div class="cyber-card" style="border-left: 4px solid ${a.state === 'ALARM' ? 'var(--accent-crimson)' : 'var(--accent-emerald)'}; margin-bottom: 0.75rem; padding: 1rem;">
+        <div class="cyber-card" style="margin-bottom: 0.75rem; padding: 1rem; border-color: ${a.state === 'ALARM' ? 'rgba(239, 68, 68, 0.4)' : 'rgba(255, 255, 255, 0.08)'};">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
-            <div style="font-weight: 700; color: #fff; font-family: var(--font-mono); font-size: 0.9rem;">
-              ${a.name}
+            <div style="font-weight: 700; color: #fff; font-family: var(--font-mono); font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
+              <span class="pulse-dot ${a.state === 'ALARM' ? 'pulse-dot-crimson' : 'pulse-dot-emerald'}"></span>
+              <span>${a.name}</span>
             </div>
             <span class="badge ${a.state === 'ALARM' ? 'badge-critical' : 'badge-low'}">
               ${a.state}

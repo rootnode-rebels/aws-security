@@ -184,6 +184,10 @@ async function apiFetch(endpoint, options = {}) {
 
 // Router & Tab Switching
 function switchTab(tabId) {
+  if (!tabId || tabId === "undefined" || tabId === "null") {
+    tabId = "user-portal";
+  }
+
   // Super Admin Route Protection: CMS dashboard only accessible to Super Admin logins
   if (tabId === "cms-dashboard" && typeof isSuperAdmin === "function" && !isSuperAdmin(AppState.user)) {
     showToast("Access Restricted: Super Admin privileges required.", "error");
@@ -563,8 +567,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     updateAuthUI();
   }
 
-  // Navigation clicks (attached immediately for zero delay)
-  document.querySelectorAll(".nav-btn").forEach(btn => {
+  // Navigation clicks (attached only to tab navigation buttons with data-tab)
+  document.querySelectorAll(".nav-btn[data-tab]").forEach(btn => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
 
@@ -647,12 +651,37 @@ window.setSuperAdminEmail = function(email) {
   showToast(`Super Admin email registered: ${trimmed}`, "success");
 };
 
-// Central Auth UI updater for Logout button and Admin privileges
+// Central Auth UI updater for Logout button, Admin privileges, and Login vs App Navbar visibility
 function updateAuthUI() {
   const isLoggedIn = !!(AppState.token && AppState.user);
   const isSuper = isSuperAdmin(AppState.user);
 
-  // 1. Logout button: ONLY show when user logs in
+  // 1. Main Navigation Tabs (Portal, Simulator, Blue Team, etc.): ONLY show when logged in
+  const mainNav = document.getElementById("main-nav-container") || document.querySelector("nav[aria-label='Main Navigation']");
+  if (mainNav) {
+    mainNav.style.display = isLoggedIn ? "block" : "none";
+  }
+
+  // 2. Mobile Menu Toggle: ONLY show when logged in
+  const mobileMenuBtn = document.querySelector(".mobile-menu-btn");
+  if (mobileMenuBtn) {
+    mobileMenuBtn.style.display = isLoggedIn ? "block" : "none";
+  }
+
+  // 3. Status Beacon (LIVE: 2s) & SNS Inbox: ONLY show when logged in
+  const liveSync = document.getElementById("nav-live-sync") || document.querySelector(".live-sync-beacon");
+  if (liveSync) {
+    liveSync.style.display = isLoggedIn ? "inline-flex" : "none";
+  }
+  const navSnsBtn = document.getElementById("btn-nav-sns");
+  if (navSnsBtn) {
+    navSnsBtn.style.display = isLoggedIn ? "inline-flex" : "none";
+  }
+
+  // 4. Sound, Practice, and Help remain cleanly visible on the login screen
+  // (btn-sound-toggle, nav-practice-btn, nav-help-btn)
+
+  // 5. Logout button: ONLY show when user logs in
   const navLogoutItem = document.getElementById("nav-item-logout");
   const navLogoutBtn = document.getElementById("btn-prominent-logout");
   if (navLogoutItem) {
@@ -662,7 +691,7 @@ function updateAuthUI() {
     navLogoutBtn.style.display = isLoggedIn ? "inline-flex" : "none";
   }
 
-  // 2. Admin Privileges / CMS tab: ONLY show for Super Admin
+  // 6. Admin Privileges / CMS tab: ONLY show for Super Admin
   const navCmsItem = document.getElementById("nav-item-cms");
   const navCmsBtn = document.querySelector('[data-tab="cms-dashboard"]');
   if (navCmsItem) {

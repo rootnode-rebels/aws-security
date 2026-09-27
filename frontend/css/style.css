@@ -4,8 +4,26 @@
    Aesthetics: Translucent Frosted Glass Materials, Multi-Layered Specular Rims,
    Continuous Squircle Curvature, Monochromatic Eye-Comfort Palette
    ========================================================================== */
+/* Fonts are loaded asynchronously and preconnected in HTML head to prevent render-blocking waterfalls */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+/* Material Symbols Font Rule */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'liga';
+  vertical-align: middle;
+}
 
 :root {
   /* ========================================================================
@@ -489,6 +507,7 @@ body {
   transition: var(--apple-spring);
   position: relative;
   overflow: hidden;
+  contain: layout style;
 }
 
 .glass-panel:hover, .cyber-card:hover {
@@ -1543,6 +1562,20 @@ body {
   justify-content: center;
   margin-bottom: 1rem;
   box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.3);
+}
+
+.auth-shield-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-block;
+  filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.5));
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), filter 0.3s ease;
+  will-change: transform;
+}
+
+.auth-card:hover .auth-shield-icon {
+  transform: scale(1.08);
+  filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.85));
 }
 
 .auth-title {

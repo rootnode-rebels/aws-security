@@ -160,15 +160,16 @@ class LiquidGlassBackground {
 
     // 3. Ambient Micro-refraction Floating Dust Motes (Neutral Silver Photons)
     this.caustics = [];
-    const nodeCount = Math.floor(Math.min(w, 1400) / 15); // Heavily increased density for cyber network
+    const isMobile = w < 768;
+    const nodeCount = isMobile ? 16 : Math.min(34, Math.floor(w / 38));
     for (let i = 0; i < nodeCount; i++) {
       this.caustics.push({
         x: Math.random() * w,
         y: Math.random() * h,
-        vx: (Math.random() - 0.5) * 0.4,
-        vy: (Math.random() - 0.5) * 0.4,
-        radius: Math.random() * 2.5 + 1.0,
-        alpha: Math.random() * 0.6 + 0.3,
+        vx: (Math.random() - 0.5) * 0.35,
+        vy: (Math.random() - 0.5) * 0.35,
+        radius: Math.random() * 2.0 + 0.8,
+        alpha: Math.random() * 0.5 + 0.3,
         pulseSpeed: Math.random() * 0.02 + 0.01,
         pulseOffset: Math.random() * Math.PI * 2
       });
@@ -177,6 +178,183 @@ class LiquidGlassBackground {
 
   init() {
     this.resize();
+  }
+
+  drawAmbientSun(w) {
+    const sunRadius = Math.max(w * 0.75, 900);
+    const sunPulse = 0.28 + Math.sin(this.time * 0.003) * 0.02;
+    const sunGrad = this.ctx.createRadialGradient(
+      w * 0.5, -50, 0,
+      w * 0.5, -50, sunRadius
+    );
+    sunGrad.addColorStop(0, `rgba(255, 255, 255, ${sunPulse})`);
+    sunGrad.addColorStop(0.30, `rgba(255, 255, 255, ${sunPulse * 0.50})`);
+    sunGrad.addColorStop(0.65, `rgba(255, 255, 255, ${sunPulse * 0.15})`);
+    sunGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+    this.ctx.fillStyle = sunGrad;
+    this.ctx.beginPath();
+    this.ctx.arc(w * 0.5, -50, sunRadius, 0, Math.PI * 2);
+    this.ctx.fill();
+  }
+
+  drawLightBlooms() {
+    const hasMouse = this.mouse.targetX !== -1000;
+    for (let i = 0; i < this.blooms.length; i++) {
+      const b = this.blooms[i];
+      let x = b.baseX + Math.sin(this.time * b.speedX + b.phase) * b.ampX;
+      let y = b.baseY + Math.cos(this.time * b.speedY + b.phase) * b.ampY;
+
+      if (hasMouse) {
+        const dx = this.mouse.x - x;
+        const dy = this.mouse.y - y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 750 && dist > 1) {
+          const force = (1 - dist / 750) * 26;
+          x += (dx / dist) * force;
+          y += (dy / dist) * force;
+        }
+      }
+
+      const grad = this.ctx.createRadialGradient(x, y, 0, x, y, b.radius);
+      grad.addColorStop(0, `rgba(${b.r}, ${b.g}, ${b.b}, ${b.alpha})`);
+      grad.addColorStop(0.40, `rgba(${b.r}, ${b.g}, ${b.b}, ${b.alpha * 0.50})`);
+      grad.addColorStop(0.75, `rgba(${b.r}, ${b.g}, ${b.b}, ${b.alpha * 0.15})`);
+      grad.addColorStop(1, `rgba(${b.r}, ${b.g}, ${b.b}, 0)`);
+
+      this.ctx.fillStyle = grad;
+      this.ctx.beginPath();
+      this.ctx.arc(x, y, b.radius, 0, Math.PI * 2);
+      this.ctx.fill();
+    }
+  }
+
+  drawCausticRibbons(w, h) {
+    this.ctx.save();
+    const segments = 10;
+    const segWidth = w / segments;
+
+    for (let r = 0; r < this.causticRibbons.length; r++) {
+      const cr = this.causticRibbons[r];
+      const baseCy = h * cr.yRatio;
+
+      this.ctx.beginPath();
+      this.ctx.moveTo(0, baseCy);
+
+      for (let s = 0; s <= segments; s++) {
+        const px = s * segWidth;
+        const wave1 = Math.sin(this.time * cr.speed + px * cr.freq) * cr.amp;
+        const wave2 = Math.cos(this.time * (cr.speed * 1.6) + px * (cr.freq * 2.1) + s) * (cr.amp * 0.35);
+        const py = baseCy + wave1 + wave2;
+
+        if (s === 0) {
+          this.ctx.moveTo(px, py);
+        } else {
+          const prevX = (s - 1) * segWidth;
+          const prevWave1 = Math.sin(this.time * cr.speed + prevX * cr.freq) * cr.amp;
+          const prevWave2 = Math.cos(this.time * (cr.speed * 1.6) + prevX * (cr.freq * 2.1) + (s - 1)) * (cr.amp * 0.35);
+          const prevY = baseCy + prevWave1 + prevWave2;
+          this.ctx.quadraticCurveTo(prevX, prevY, (prevX + px) * 0.5, (prevY + py) * 0.5);
+        }
+      }
+
+      this.ctx.strokeStyle = `rgba(255, 255, 255, ${cr.alpha * 0.12})`;
+      this.ctx.lineWidth = 48;
+      this.ctx.stroke();
+
+      this.ctx.strokeStyle = `rgba(255, 255, 255, ${cr.alpha * 0.38})`;
+      this.ctx.lineWidth = 18;
+      this.ctx.stroke();
+
+      this.ctx.strokeStyle = `rgba(255, 255, 255, ${cr.alpha * 0.88})`;
+      this.ctx.lineWidth = 4;
+      this.ctx.stroke();
+    }
+    this.ctx.restore();
+  }
+
+  drawConstellations(w, h) {
+    const hasMouse = this.mouse.targetX !== -1000;
+    const mx = this.mouse.x;
+    const my = this.mouse.y;
+
+    // 1. Update and render particles
+    for (let i = 0; i < this.caustics.length; i++) {
+      const c = this.caustics[i];
+
+      if (hasMouse) {
+        const dx = c.x - mx;
+        const dy = c.y - my;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 140 && dist > 1) {
+          const force = (1 - dist / 140) * 1.8;
+          c.x += (dx / dist) * force;
+          c.y += (dy / dist) * force;
+        }
+      }
+
+      c.x += c.vx;
+      c.y += c.vy;
+
+      if (c.x < 0) c.x = w;
+      else if (c.x > w) c.x = 0;
+      if (c.y < 0) c.y = h;
+      else if (c.y > h) c.y = 0;
+
+      const currentAlpha = c.alpha * (0.65 + 0.35 * Math.sin(this.time * c.pulseSpeed + c.pulseOffset));
+
+      this.ctx.beginPath();
+      this.ctx.arc(c.x, c.y, c.radius, 0, Math.PI * 2);
+      this.ctx.fillStyle = `rgba(255, 255, 255, ${currentAlpha})`;
+      this.ctx.fill();
+    }
+
+    // 2. High-performance batched filaments between node pairs (Single Draw Call)
+    this.ctx.beginPath();
+    this.ctx.strokeStyle = "rgba(16, 185, 129, 0.25)";
+    this.ctx.lineWidth = 0.9;
+    const maxDist = 110;
+    const maxDistSq = maxDist * maxDist;
+
+    for (let i = 0; i < this.caustics.length; i++) {
+      const c = this.caustics[i];
+      for (let j = i + 1; j < this.caustics.length; j++) {
+        const c2 = this.caustics[j];
+        const dx = c.x - c2.x;
+        if (dx > maxDist || dx < -maxDist) continue; // Rapid 1D rejection
+        const dy = c.y - c2.y;
+        if (dy > maxDist || dy < -maxDist) continue; // Rapid 1D rejection
+
+        if (dx * dx + dy * dy < maxDistSq) {
+          this.ctx.moveTo(c.x, c.y);
+          this.ctx.lineTo(c2.x, c2.y);
+        }
+      }
+    }
+    this.ctx.stroke();
+
+    // 3. Batched mouse interaction filaments
+    if (hasMouse) {
+      this.ctx.beginPath();
+      this.ctx.strokeStyle = "rgba(56, 189, 248, 0.40)";
+      this.ctx.lineWidth = 1.1;
+      const mouseMaxDist = 140;
+      const mouseMaxDistSq = mouseMaxDist * mouseMaxDist;
+
+      for (let i = 0; i < this.caustics.length; i++) {
+        const c = this.caustics[i];
+        const dx = c.x - mx;
+        if (dx > mouseMaxDist || dx < -mouseMaxDist) continue;
+        const dy = c.y - my;
+        if (dy > mouseMaxDist || dy < -mouseMaxDist) continue;
+
+        if (dx * dx + dy * dy < mouseMaxDistSq) {
+          this.ctx.moveTo(c.x, c.y);
+          this.ctx.lineTo(mx, my);
+        }
+      }
+      this.ctx.stroke();
+    }
   }
 
   animate() {
@@ -201,173 +379,11 @@ class LiquidGlassBackground {
 
     this.ctx.clearRect(0, 0, w, h);
 
-    // ========================================================================
-    // 1. PRIMARY OVERHEAD STUDIO LIGHT EMITTER (Calm, Deep Ambient Sun)
-    // ========================================================================
-    const sunRadius = Math.max(w * 0.75, 900);
-    const sunPulse = 0.28 + Math.sin(this.time * 0.003) * 0.02;
-    const sunGrad = this.ctx.createRadialGradient(
-      w * 0.5, -50, 0,
-      w * 0.5, -50, sunRadius
-    );
-    sunGrad.addColorStop(0, `rgba(255, 255, 255, ${sunPulse})`);
-    sunGrad.addColorStop(0.30, `rgba(255, 255, 255, ${sunPulse * 0.50})`);
-    sunGrad.addColorStop(0.65, `rgba(255, 255, 255, ${sunPulse * 0.15})`);
-    sunGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-    this.ctx.fillStyle = sunGrad;
-    this.ctx.beginPath();
-    this.ctx.arc(w * 0.5, -50, sunRadius, 0, Math.PI * 2);
-    this.ctx.fill();
-
-    // ========================================================================
-    // 2. VOLUMETRIC REFRACTIVE LIGHT BLOOMS (Liquid Internal Glow)
-    // ========================================================================
-    for (let i = 0; i < this.blooms.length; i++) {
-      const b = this.blooms[i];
-      let x = b.baseX + Math.sin(this.time * b.speedX + b.phase) * b.ampX;
-      let y = b.baseY + Math.cos(this.time * b.speedY + b.phase) * b.ampY;
-
-      // Interactive gentle refraction pull towards cursor
-      if (this.mouse.targetX !== -1000) {
-        const dx = this.mouse.x - x;
-        const dy = this.mouse.y - y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 750 && dist > 1) {
-          const force = (1 - dist / 750) * 26;
-          x += (dx / dist) * force;
-          y += (dy / dist) * force;
-        }
-      }
-
-      const grad = this.ctx.createRadialGradient(x, y, 0, x, y, b.radius);
-      grad.addColorStop(0, `rgba(${b.r}, ${b.g}, ${b.b}, ${b.alpha})`);
-      grad.addColorStop(0.40, `rgba(${b.r}, ${b.g}, ${b.b}, ${b.alpha * 0.50})`);
-      grad.addColorStop(0.75, `rgba(${b.r}, ${b.g}, ${b.b}, ${b.alpha * 0.15})`);
-      grad.addColorStop(1, `rgba(${b.r}, ${b.g}, ${b.b}, 0)`);
-
-      this.ctx.fillStyle = grad;
-      this.ctx.beginPath();
-      this.ctx.arc(x, y, b.radius, 0, Math.PI * 2);
-      this.ctx.fill();
-    }
-
-    // ========================================================================
-    // 3. FLUID HARMONIC CAUSTIC RIBBONS (Light Refracting Through Liquid Glass)
-    // ========================================================================
-    this.ctx.save();
-    for (let r = 0; r < this.causticRibbons.length; r++) {
-      const cr = this.causticRibbons[r];
-      const baseCy = h * cr.yRatio;
-      
-      this.ctx.beginPath();
-      this.ctx.moveTo(0, baseCy);
-      
-      const segments = 10;
-      const segWidth = w / segments;
-      for (let s = 0; s <= segments; s++) {
-        const px = s * segWidth;
-        const wave1 = Math.sin(this.time * cr.speed + px * cr.freq) * cr.amp;
-        const wave2 = Math.cos(this.time * (cr.speed * 1.6) + px * (cr.freq * 2.1) + s) * (cr.amp * 0.35);
-        const py = baseCy + wave1 + wave2;
-
-        if (s === 0) {
-          this.ctx.moveTo(px, py);
-        } else {
-          const prevX = (s - 1) * segWidth;
-          const prevWave1 = Math.sin(this.time * cr.speed + prevX * cr.freq) * cr.amp;
-          const prevWave2 = Math.cos(this.time * (cr.speed * 1.6) + prevX * (cr.freq * 2.1) + (s - 1)) * (cr.amp * 0.35);
-          const prevY = baseCy + prevWave1 + prevWave2;
-          const cpx = (prevX + px) / 2;
-          const cpy = (prevY + py) / 2;
-          this.ctx.quadraticCurveTo(prevX, prevY, cpx, cpy);
-        }
-      }
-
-      // Fast multi-layer optical glow without CPU blur rasterization
-      // Layer 1: Wide diffuse atmospheric halo
-      this.ctx.strokeStyle = `rgba(255, 255, 255, ${cr.alpha * 0.12})`;
-      this.ctx.lineWidth = 64;
-      this.ctx.stroke();
-
-      // Layer 2: Medium refractive caustic body
-      this.ctx.strokeStyle = `rgba(255, 255, 255, ${cr.alpha * 0.38})`;
-      this.ctx.lineWidth = 24;
-      this.ctx.stroke();
-
-      // Layer 3: Concentrated luminous core filament
-      this.ctx.strokeStyle = `rgba(255, 255, 255, ${cr.alpha * 0.88})`;
-      this.ctx.lineWidth = 5;
-      this.ctx.stroke();
-    }
-    this.ctx.restore();
-
-    // ========================================================================
-    // 4. SUBTLE INTERACTIVE CYBER CONSTELLATION & PARTICLE DRIFT
-    // ========================================================================
-    for (let i = 0; i < this.caustics.length; i++) {
-      const c = this.caustics[i];
-
-      // Subtle mouse deflection (gentle repulsion without any circular artifacts)
-      if (this.mouse.targetX !== -1000) {
-        const dx = c.x - this.mouse.x;
-        const dy = c.y - this.mouse.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 140 && dist > 1) {
-          const force = (1 - dist / 140) * 1.8;
-          c.x += (dx / dist) * force;
-          c.y += (dy / dist) * force;
-        }
-      }
-
-      c.x += c.vx;
-      c.y += c.vy;
-
-      if (c.x < 0) c.x = w;
-      else if (c.x > w) c.x = 0;
-      if (c.y < 0) c.y = h;
-      else if (c.y > h) c.y = 0;
-
-      const currentAlpha = c.alpha * (0.65 + 0.35 * Math.sin(this.time * c.pulseSpeed + c.pulseOffset));
-
-      this.ctx.beginPath();
-      this.ctx.arc(c.x, c.y, c.radius, 0, Math.PI * 2);
-      this.ctx.fillStyle = `rgba(255, 255, 255, ${currentAlpha})`;
-      this.ctx.fill();
-
-      // Interactive Cyber Constellation Filaments between nodes
-      for (let j = i + 1; j < this.caustics.length; j++) {
-        const c2 = this.caustics[j];
-        const cdx = c.x - c2.x;
-        const cdy = c.y - c2.y;
-        const cdistSq = cdx * cdx + cdy * cdy;
-        if (cdistSq < 15000) { // < ~122px
-          const lineAlpha = (1 - Math.sqrt(cdistSq) / 122) * 0.40;
-          this.ctx.beginPath();
-          this.ctx.moveTo(c.x, c.y);
-          this.ctx.lineTo(c2.x, c2.y);
-          this.ctx.strokeStyle = `rgba(16, 185, 129, ${lineAlpha})`; // Emerald green cyber hue
-          this.ctx.lineWidth = 1.0;
-          this.ctx.stroke();
-        }
-      }
-
-      // Interactive mouse filaments
-      if (this.mouse.targetX !== -1000) {
-        const mdx = c.x - this.mouse.x;
-        const mdy = c.y - this.mouse.y;
-        const mdistSq = mdx * mdx + mdy * mdy;
-        if (mdistSq < 22500) { // < 150px
-          const mAlpha = (1 - Math.sqrt(mdistSq) / 150) * 0.60;
-          this.ctx.beginPath();
-          this.ctx.moveTo(c.x, c.y);
-          this.ctx.lineTo(this.mouse.x, this.mouse.y);
-          this.ctx.strokeStyle = `rgba(56, 189, 248, ${mAlpha})`; // Cyan interaction hue
-          this.ctx.lineWidth = 1.2;
-          this.ctx.stroke();
-        }
-      }
-    }
+    // Modularized rendering pipeline
+    this.drawAmbientSun(w);
+    this.drawLightBlooms();
+    this.drawCausticRibbons(w, h);
+    this.drawConstellations(w, h);
 
     this.animId = requestAnimationFrame(() => this.animate());
   }

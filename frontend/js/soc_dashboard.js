@@ -293,7 +293,7 @@ function selectFlightRoute(cityName, lat, lon, velocityKmh, isAnomaly, btn) {
   if (btn) btn.classList.add("active");
 
   // Update tactical HUD
-  updateFlightHud(preset);
+  updateFlightHud(flightCanvasEngine.dest);
 }
 window.selectFlightRoute = selectFlightRoute;
 

@@ -781,6 +781,8 @@ async function executeSelfUnlock() {
     const unfreezeBanner = document.getElementById("primary-unfreeze-banner");
     if (unfreezeBanner) unfreezeBanner.style.display = "none";
     await checkCurrentUser();
+    await loadUserAlerts(true);
+    await loadUserSessions(true);
   } else {
     showToast(res.data?.detail || "Could not restore account.", "error");
   }
@@ -965,6 +967,7 @@ async function killAllOtherSessions() {
     const count = res.data?.terminated_count || 0;
     showToast(`Signed out of ${count} remote device(s). Your main device remains active.`, "success");
     loadUserSessions(true);
+    loadUserAlerts(true);
   } else {
     showToast(res.data?.detail || "Failed to sign out other devices.", "error");
   }
@@ -1251,7 +1254,30 @@ async function loadUserAlerts(force = false) {
       alerts.forEach(a => lastSeenAlertIds.add(a.alert_id));
       isFirstAlertsLoad = false;
 
-      const signature = JSON.stringify(alerts.map(a => [a.alert_id, a.risk_score, a.status]));
+      // Update Hero Bento Security Status card based on active threats
+      const hasActiveThreat = alerts.some(a => a.status !== "RESOLVED" && a.status !== "RESOLVED_VERIFIED" && a.status !== "RESOLVED_APPROVED" && ((a.risk_score || 0) >= 60 || a.type === "BRUTE_FORCE_LOCKOUT"));
+      const mSecStatus = document.getElementById("metric-security-status");
+      const mSecIcon = document.getElementById("metric-security-icon");
+      const mSecDot = document.getElementById("metric-security-dot");
+      const mSecSub = document.getElementById("metric-security-sub");
+      const mSecBadge = document.getElementById("metric-security-badge");
+
+      if (mSecStatus && mSecIcon) {
+        if (hasActiveThreat) {
+          mSecStatus.textContent = "Threat Detected";
+          mSecIcon.className = "bento-icon-box bento-icon-crimson";
+          if (mSecDot) mSecDot.className = "pulse-dot pulse-dot-crimson";
+          if (mSecSub) mSecSub.textContent = "Action recommended";
+          if (mSecBadge) mSecBadge.textContent = "ALERT";
+        } else {
+          mSecStatus.textContent = "Safe";
+          mSecIcon.className = "bento-icon-box bento-icon-emerald";
+          if (mSecDot) mSecDot.className = "pulse-dot pulse-dot-emerald";
+          if (mSecSub) mSecSub.textContent = "Automatic protection on";
+          if (mSecBadge) mSecBadge.textContent = "ENABLED";
+        }
+      }
+
       if (!force && signature === lastAlertsSignature) {
         return;
       }
@@ -1649,11 +1675,21 @@ function handleLogout() {
   AppState.token = null;
   AppState.user = null;
   localStorage.removeItem("cyber_token");
+  localStorage.removeItem("is_primary_device");
   if (userPollingInterval) {
     clearInterval(userPollingInterval);
     userPollingInterval = null;
   }
   showToast("Logged out securely.", "info");
+
+  // Cleanly navigate back to home / sign-in portal
+  if (typeof switchTab === "function") {
+    switchTab("user-portal");
+  }
+  if (typeof switchAuthTab === "function") {
+    switchAuthTab("login");
+  }
+
   renderUserPortal();
   if (typeof updateAuthUI === "function") updateAuthUI();
 }

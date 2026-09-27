@@ -22,6 +22,7 @@ from fastapi import FastAPI, Request, Response, HTTPException, Depends, Header, 
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
 
 # Database & Security imports
@@ -94,6 +95,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(self)"
+    return response
 
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError):
@@ -1462,6 +1474,11 @@ def unlock_self(request: Request, user: Dict[str, Any] = Depends(get_current_use
         {"email": email},
         {"$set": {"status": "ACTIVE", "updated_at": datetime.now(timezone.utc).isoformat()}}
     )
+    # Clear / resolve alerts on self-unfreeze
+    db.get_collection("security_alerts").update_many(
+        {"user_email": email, "status": {"$nin": ["RESOLVED", "RESOLVED_VERIFIED", "RESOLVED_APPROVED"]}},
+        {"$set": {"status": "RESOLVED", "resolution": "VERIFIED_SAFE_BY_OWNER", "resolved_at": datetime.now(timezone.utc).isoformat()}}
+    )
     rate_limiter.record_success(f"acct:{email}")
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
@@ -1891,6 +1908,12 @@ def kill_other_sessions(authorization: Optional[str] = Header(None), user: Dict[
             db.active_sessions.delete_one({"session_id": s.get("session_id"), "user_email": user["email"]})
             deleted_count += 1
 
+    # Mitigate unresolved threat alerts since remote attacker sessions were terminated
+    db.get_collection("security_alerts").update_many(
+        {"user_email": user["email"], "status": {"$nin": ["RESOLVED", "RESOLVED_VERIFIED", "RESOLVED_APPROVED"]}},
+        {"$set": {"status": "RESOLVED", "resolution": "MITIGATED_REMOTE_SESSIONS_TERMINATED", "resolved_at": datetime.now(timezone.utc).isoformat()}}
+    )
+
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
         level="INFO",
@@ -1930,6 +1953,12 @@ def lock_account(request: Request, authorization: Optional[str] = Header(None), 
     # Freeze account and kill all remote secondary sessions, preserving primary device session!
     db.users.update_one({"email": email}, {"$set": {"status": "LOCKED"}})
     db.active_sessions.delete_many({"user_email": email, "is_primary_device": {"$ne": True}})
+
+    # Mitigate and resolve existing active threat alerts since remote attacker sessions were severed
+    db.get_collection("security_alerts").update_many(
+        {"user_email": email, "status": {"$nin": ["RESOLVED", "RESOLVED_VERIFIED", "RESOLVED_APPROVED"]}},
+        {"$set": {"status": "RESOLVED", "resolution": "MITIGATED_SIGN_OUT_EVERYWHERE", "resolved_at": datetime.now(timezone.utc).isoformat()}}
+    )
 
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",

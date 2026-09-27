@@ -47,3 +47,14 @@ logs/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Local database
+data/db.json
+
+screencapture*.png
+temp_diff.txt
+test_results.txt
+docs_extracted.txt
+docs_full.txt
+.gitignore-antigravity
+
