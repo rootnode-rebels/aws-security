@@ -564,7 +564,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Navigation clicks (attached immediately for zero delay)
-  document.querySelectorAll(".nav-btn").forEach(btn => {
+  document.querySelectorAll(".nav-btn[data-tab]").forEach(btn => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
 

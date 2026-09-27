@@ -188,12 +188,21 @@ class TestNotificationService(unittest.TestCase):
 
     def test_notification_status_and_engine_mode(self):
         """Verify engine status keys and /api/security/dispatched-notifications metadata."""
+        # Authenticate first
+        login_res = self.client.post("/api/auth/login", json={
+            "email": self.test_email,
+            "password": self.test_pwd,
+            "fingerprint": {"browser": "Chrome"}
+        })
+        token = login_res.json()["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
         status = notification_service.get_status()
         self.assertIn("mode", status)
         self.assertIn("description", status)
         self.assertIn("live_delivery", status)
 
-        res = self.client.get("/api/security/dispatched-notifications")
+        res = self.client.get("/api/security/dispatched-notifications", headers=headers)
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertIn("engine_mode", data)
@@ -203,28 +212,36 @@ class TestNotificationService(unittest.TestCase):
 
     def test_clear_endpoints_for_events_cloudwatch_and_notifications(self):
         """Verify clear endpoints empty records and reset metrics."""
+        # Authenticate first
+        login_res = self.client.post("/api/auth/login", json={
+            "email": self.test_email,
+            "password": self.test_pwd,
+            "fingerprint": {"browser": "Chrome"}
+        })
+        token = login_res.json()["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
         # 1. Clear dispatched notifications
-        clear_notif = self.client.post("/api/security/dispatched-notifications/clear")
+        clear_notif = self.client.post("/api/security/dispatched-notifications/clear", headers=headers)
         self.assertEqual(clear_notif.status_code, 200)
         self.assertEqual(clear_notif.json()["status"], "SUCCESS")
 
         # 2. Clear security events
-        clear_events = self.client.post("/api/security/events/clear")
+        clear_events = self.client.post("/api/security/events/clear", headers=headers)
         self.assertEqual(clear_events.status_code, 200)
         self.assertEqual(clear_events.json()["status"], "SUCCESS")
-        events_res = self.client.get("/api/security/events")
+        events_res = self.client.get("/api/security/events", headers=headers)
         self.assertEqual(len(events_res.json()["events"]), 0)
 
         # 3. Clear cloudwatch telemetry
-        clear_cw = self.client.post("/api/monitoring/cloudwatch/clear")
+        clear_cw = self.client.post("/api/monitoring/cloudwatch/clear", headers=headers)
         self.assertEqual(clear_cw.status_code, 200)
         self.assertEqual(clear_cw.json()["status"], "SUCCESS")
-        cw_summary = self.client.get("/api/monitoring/cloudwatch").json()
+        cw_summary = self.client.get("/api/monitoring/cloudwatch", headers=headers).json()
         self.assertEqual(len(cw_summary["recent_logs"]), 0)
         self.assertEqual(cw_summary["metrics"]["BlockedHijacks"], 0)
         self.assertEqual(cw_summary["metrics"]["HighRiskDetections"], 0)
         self.assertGreaterEqual(cw_summary["metrics"]["Invocations"], 1)
-
 
 if __name__ == "__main__":
     unittest.main()

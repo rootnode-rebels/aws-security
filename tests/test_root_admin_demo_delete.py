@@ -9,6 +9,8 @@ import time
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+os.environ["SUPER_ADMIN_PASSWORD"] = "likitha@2005"
+
 from fastapi.testclient import TestClient
 from backend.app import app, seed_demo_user_if_needed
 from database.db_manager import db
