@@ -125,8 +125,12 @@ def is_super_admin_account(email_or_user) -> bool:
 def seed_demo_user_if_needed(force: bool = False):
     """Seeds baseline legitimate user accounts for instant multi-browser testing."""
     try:
+        import secrets
         admin_email = os.getenv("SUPER_ADMIN_EMAIL", "superadmin@awssecurity.io").strip().lower()
-        admin_pwd = os.getenv("SUPER_ADMIN_PASSWORD", "SuperAdmin#2026")
+        admin_pwd = os.getenv("SUPER_ADMIN_PASSWORD")
+        if not admin_pwd:
+            admin_pwd = secrets.token_urlsafe(16)
+            print(f"\\n[SECURITY WARNING] No SUPER_ADMIN_PASSWORD set in .env! Generated secure temporary password: {admin_pwd}\\n")
         existing_admin = db.users.find_one({"email": admin_email})
         adm_pw_hash, adm_salt = hash_password(admin_pwd)
         adm_sec_hash, adm_sec_salt = hash_password(admin_pwd)
