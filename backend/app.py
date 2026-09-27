@@ -177,15 +177,7 @@ def seed_demo_user_if_needed(force: bool = False):
     if not force and db.users.count_documents({}) > 1:
         return
 
-    # Add migration logic to downgrade mistakenly elevated users
-    try:
-        db.users.update_many(
-            {"email": {"$nin": ["demo@awssecurity.io", "demo@aegisguard.io", admin_email, "superadmin@awssecurity.io"]}},
-            {"$set": {"role": "USER", "is_root_admin": False, "is_super_admin": False}}
-        )
-    except Exception as e:
-        pass
-
+    # Removed aggressive downgrade logic so dynamic DB assignments remain intact.
     accounts = [
         ("demouser@mail.com", "DemoUser.AWS@29", "AWS Presentation Demo User", "USER"),
         ("demo@awssecurity.io", os.getenv("DEMO_PWD_1", "AWSSecurity#2026"), "Demo Security Lead", "ROOT_ADMIN"),
