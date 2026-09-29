@@ -1,0 +1,12 @@
+{
+  "ImageRepository": {
+    "ImageIdentifier": "242254325378.dkr.ecr.eu-central-1.amazonaws.com/aws-security-defense:latest",
+    "ImageConfiguration": {
+      "Port": "8000"
+    },
+    "ImageRepositoryType": "ECR"
+  },
+  "AuthenticationConfiguration": {
+    "AccessRoleArn": "arn:aws:iam::242254325378:role/AppRunnerECRAccess"
+  }
+}
