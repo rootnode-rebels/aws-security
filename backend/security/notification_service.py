@@ -263,7 +263,7 @@ class NotificationDispatcher:
             last_sent = self._alert_cooldowns.get(cooldown_key, 0)
             now_ts = time.time()
             cooldown_window = int(os.getenv("NOTIFICATION_COOLDOWN_SECONDS", "300"))
-            is_in_cooldown = (now_ts - last_sent < cooldown_window) and (os.getenv("DEPLOYMENT_MODE", "").upper() not in ("TEST", "DEVELOPMENT"))
+            is_in_cooldown = (now_ts - last_sent < cooldown_window) and (os.getenv("DEPLOYMENT_MODE", "").upper() not in ("TEST", "DEVELOPMENT")) and notification_type not in ("MFA_VERIFICATION_CODE", "PASSWORD_RESET_TOKEN")
 
             if is_in_cooldown:
                 meta["cooldown_applied"] = True

@@ -673,26 +673,20 @@ def get_vpn_presets():
 
 @app.post("/api/auth/login")
 def login(payload: LoginSchema, request: Request):
-    client_ip = resolve_client_ip(request, payload.spoofed_ip)
-    user_agent = payload.spoofed_user_agent or request.headers.get("user-agent", "")
+    client_ip = resolve_client_ip(request)
+    user_agent = request.headers.get("user-agent", "")
     email = sanitize_email(payload.email)
     raw_password = payload.password
 
     # Geographic resolution:
-    # If client passed an explicit custom geo (e.g. from HTML5 Geolocation API), prioritize it for 100% precision.
-    # Otherwise, resolve via GeoIP intelligence cache.
-    if payload.geo and payload.geo.get("lat") is not None and payload.geo.get("lon") is not None:
-        geo = payload.geo
-        geo["city"] = geo.get("city") or "Precise GPS Location"
-        geo["country"] = geo.get("country") or "Device"
-    else:
-        resolved = resolve_ip_geolocation(client_ip)
-        geo = {
-            "lat": resolved.get("lat", 40.7128),
-            "lon": resolved.get("lon", -74.0060),
-            "city": resolved.get("city", "New York"),
-            "country": resolved.get("country", "US")
-        }
+    # Always resolve via secure backend GeoIP intelligence cache to prevent client-side spoofing.
+    resolved = resolve_ip_geolocation(client_ip)
+    geo = {
+        "lat": resolved.get("lat", 40.7128),
+        "lon": resolved.get("lon", -74.0060),
+        "city": resolved.get("city", "New York"),
+        "country": resolved.get("country", "US")
+    }
     fingerprint = sanitize_mongo_dict(payload.fingerprint or {})
 
     # 1. Check Rate Limiter (Dual-layer brute-force protection: IP + Target Account)
