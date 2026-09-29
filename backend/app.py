@@ -137,8 +137,12 @@ def is_super_admin_account(email_or_user) -> bool:
 def seed_demo_user_if_needed(force: bool = False):
     """Seeds baseline legitimate user accounts for instant multi-browser testing."""
     try:
+        import secrets
         admin_email = os.getenv("SUPER_ADMIN_EMAIL", "superadmin@awssecurity.io").strip().lower()
-        admin_pwd = os.getenv("SUPER_ADMIN_PASSWORD", "SuperAdmin#2026")
+        admin_pwd = os.getenv("SUPER_ADMIN_PASSWORD")
+        if not admin_pwd:
+            admin_pwd = secrets.token_urlsafe(16)
+            print(f"\n[SECURITY WARNING] No SUPER_ADMIN_PASSWORD set in .env! Generated secure temporary password: {admin_pwd}\n")
         existing_admin = db.users.find_one({"email": admin_email})
         adm_pw_hash, adm_salt = hash_password(admin_pwd)
         adm_sec_hash, adm_sec_salt = hash_password(admin_pwd)
@@ -185,14 +189,7 @@ def seed_demo_user_if_needed(force: bool = False):
     if not force and db.users.count_documents({}) > 1:
         return
 
-    # Add migration logic to downgrade mistakenly elevated users
-    try:
-        db.users.update_many(
-            {"email": {"$nin": ["demo@awssecurity.io", "demo@aegisguard.io", admin_email, "superadmin@awssecurity.io"]}},
-            {"$set": {"role": "USER", "is_root_admin": False, "is_super_admin": False}}
-        )
-    except Exception as e:
-        pass
+    # Preserved dynamic DB assignments intact without aggressive startup demotions
 
     accounts = [
         ("demouser@mail.com", "DemoUser.AWS@29", "AWS Presentation Demo User", "USER"),
