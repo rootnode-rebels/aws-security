@@ -1038,7 +1038,7 @@ def login(payload: LoginSchema, request: Request):
     session_expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
 
     is_dummy_seeded = bool(primary_device and primary_device.get("browser_id") == "chrome_uuid_legit_001")
-    if not primary_device or is_dummy_seeded:
+    if not primary_device:
         # First sign-in -> enroll current browser as Main Device
         prompt_primary_device = True
         device_tier = "PRIMARY"
