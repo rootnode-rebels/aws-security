@@ -21,12 +21,12 @@ class TestRootAdminAndDemoDeletion(unittest.TestCase):
     def setUpClass(cls):
         os.environ["DEPLOYMENT_MODE"] = "DEVELOPMENT"
         cls.client = TestClient(app)
-        admin_email = os.getenv("SUPER_ADMIN_EMAIL", "likhithadm@gmail.com")
+        admin_email = os.getenv("SUPER_ADMIN_EMAIL", "anushree2k5@gmail.com")
         db.active_sessions.delete_many({"user_email": admin_email})
         # Authenticate Super Admin to get admin authorization token
         login_res = cls.client.post("/api/auth/login", json={
             "email": admin_email,
-            "password": os.getenv("SUPER_ADMIN_PASSWORD", "likitha@2005"),
+            "password": os.getenv("SUPER_ADMIN_PASSWORD", "TempAdmin#2026"),
             "fingerprint": {"browser": "Chrome", "browser_id": "root_admin_test_bid", "os": "Windows NT 10.0"},
             "terminate_other_sessions": True
         })
