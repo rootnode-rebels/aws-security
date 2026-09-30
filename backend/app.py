@@ -1633,7 +1633,7 @@ def get_me(authorization: Optional[str] = Header(None), user: Dict[str, Any] = D
         "role": "SUPER_ADMIN" if is_super else user.get("role", "ROOT_ADMIN"),
         "is_root_admin": user.get("is_root_admin", True),
         "is_super_admin": is_super,
-        "created_at": user["created_at"],
+        "created_at": user.get("created_at"),
         "last_login": user.get("last_successful_login"),
         "trusted_devices_count": len(user.get("trusted_devices", [])),
         "primary_device": user.get("primary_device") if is_primary else None, # Zero primary device data given to secondary devices!

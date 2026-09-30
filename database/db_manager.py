@@ -295,8 +295,13 @@ class DatabaseManager:
                 print(f"[DB] Connected successfully to live MongoDB instance (DB: {self.db.name}).")
                 self._init_mongo_indexes()
             except Exception as e:
-                print(f"[DB] Could not connect to MongoDB ({e}). Falling back to local document store.")
-                self.use_mongo = False
+                is_prod = os.getenv("DEPLOYMENT_MODE", "").upper() == "AWS_ECS_PROD"
+                if is_prod:
+                    print(f"[CRITICAL DB ERROR] Could not connect to MongoDB in PRODUCTION: {e}")
+                    raise RuntimeError("FATAL: MongoDB connection failed in Production. Refusing to fall back to local db.json.")
+                else:
+                    print(f"[DB] Could not connect to MongoDB ({e}). Falling back to local document store.")
+                    self.use_mongo = False
 
     def _init_mongo_indexes(self):
         """Creates required MongoDB indexes (Unique and TTL) safely."""
