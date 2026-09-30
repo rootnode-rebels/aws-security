@@ -177,6 +177,25 @@ class NotificationDispatcher:
             logger.debug(f"[NotificationDispatcher] Boto3 SES unavailable: {e}")
             return None
 
+    def subscribe_email_to_sns(self, email: str) -> bool:
+        """Automatically subscribes a user's email address to the configured Amazon SNS Topic."""
+        client = self._get_sns_client()
+        if not client or not self.sns_topic_arn:
+            return False
+            
+        try:
+            client.subscribe(
+                TopicArn=self.sns_topic_arn,
+                Protocol='email',
+                Endpoint=email,
+                ReturnSubscriptionArn=True
+            )
+            logger.info(f"[NotificationDispatcher] Successfully triggered SNS email subscription for {email}")
+            return True
+        except Exception as e:
+            logger.warning(f"[NotificationDispatcher] AWS SNS subscription failed for {email}: {e}")
+            return False
+
     def _publish_sns(self, recipient_email: str, subject: str, message: str, notification_type: str) -> bool:
         """Publishes security alert to Amazon SNS Topic with message attributes."""
         client = self._get_sns_client()
