@@ -1065,11 +1065,10 @@ def login(payload: LoginSchema, request: Request):
         if primary_bid and browser_id:
             matches_primary = bool(primary_bid == browser_id)
         else:
-            matches_primary = bool(
-                primary_device.get("canvas_hash") == fingerprint.get("canvas_hash")
-                and primary_device.get("browser") == browser_name
-                and primary_device.get("os") == os_name
-            )
+            # CRITICAL SECURITY FIX: Never fallback to hardware fingerprinting (canvas_hash) to grant 
+            # Primary Device authentication. Hardware fingerprints can collide or be spoofed.
+            # A device MUST possess the cryptographic browser_id token in LocalStorage to be Primary.
+            matches_primary = False
 
         if matches_primary:
             device_tier = "PRIMARY"
