@@ -9,8 +9,7 @@ from backend.security.auth import hash_password
 
 uri = "mongodb+srv://anushree2k5_db_user:V33Ryxrh8VtUD83I@cluster0.utejvsm.mongodb.net/?retryWrites=true&w=majority"
 client = MongoClient(uri)
-db = client['test'] # Atlas default DB is often 'test' if not specified, wait, let's use 'aws_security'
-db = client.get_default_database('aws_security')
+db = client.get_database('account_security_db')
 users = db['users']
 
 print("Connected to MongoDB Atlas. Seeding admin accounts...")
