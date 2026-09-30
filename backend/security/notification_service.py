@@ -144,7 +144,17 @@ class NotificationDispatcher:
         try:
             import boto3
             session = boto3.Session()
-            self._boto3_sns_client = session.client("sns", region_name=os.getenv("AWS_REGION", "us-east-1"))
+            
+            # Dynamically extract region from ARN (arn:aws:sns:eu-central-1:...)
+            region = os.getenv("AWS_REGION")
+            if not region and self.sns_topic_arn:
+                parts = self.sns_topic_arn.split(":")
+                if len(parts) >= 4:
+                    region = parts[3]
+            if not region:
+                region = "us-east-1"
+                
+            self._boto3_sns_client = session.client("sns", region_name=region)
             return self._boto3_sns_client
         except Exception as e:
             logger.debug(f"[NotificationDispatcher] Boto3 SNS unavailable: {e}")
