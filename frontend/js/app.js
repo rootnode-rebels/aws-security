@@ -796,6 +796,7 @@ window.addEventListener("scroll", () => {
 
 // Initialize features on load
 document.addEventListener("DOMContentLoaded", () => {
+  initTheme(); // Sync theme icons once DOM is ready
   setTimeout(() => {
     if (!localStorage.getItem("cookies_accepted")) {
       const banner = document.getElementById("cookie-banner");

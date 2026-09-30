@@ -2039,12 +2039,12 @@ def get_dispatched_notifications(limit: int = 50, user: Dict[str, Any] = Depends
     is_admin = bool(user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin"))
     query = {} if is_admin else {"recipient_email": user["email"]}
 
-    records = db.get_collection("dispatched_notifications").find(
+    records = list(db.get_collection("dispatched_notifications").find(
         query,
         sort_key="created_at",
         reverse=True,
         limit=min(limit, 100)
-    )
+    ))
     for r in records:
         if "_id" in r:
             del r["_id"]
