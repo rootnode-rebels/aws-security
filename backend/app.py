@@ -526,9 +526,6 @@ def register(payload: RegisterSchema, request: Request):
     }
     db.users.insert_one(user_doc)
 
-    # Automatically subscribe the new user to the Amazon SNS topic for MFA & security alerts
-    notification_service.subscribe_email_to_sns(clean_email)
-
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
         level="INFO",
