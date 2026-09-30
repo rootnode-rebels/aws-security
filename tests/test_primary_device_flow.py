@@ -73,11 +73,11 @@ def test_primary_device_full_flow():
     assert data1.get("device_tier") == "PRIMARY"
     assert data1.get("is_primary_device") is True
 
-    # 3. Designate / Update Browser 1 as Primary Device with Secondary Password
+    # 3. Designate / Update Browser 1 as Primary Device with Secondary Password (using account password fallback)
     set_prim_resp = client.post("/api/auth/devices/set-primary", headers=headers1, json={
         "is_primary": True,
         "device_label": "Primary Security Portal (Chrome on Windows)",
-        "secondary_password": "MasterKey#2026"
+        "secondary_password": test_password
     })
     assert set_prim_resp.status_code == 200, f"Set primary failed: {set_prim_resp.text}"
     print(f"[Step 3] Verified Browser 1 as primary device: {set_prim_resp.json()['message']}")
@@ -201,7 +201,7 @@ def test_secondary_device_verify_mfa_resolves_approval_alert():
     set_prim = client.post("/api/auth/devices/set-primary", headers=headers1, json={
         "is_primary": True,
         "device_label": "Primary Security Portal (Desktop)",
-        "secondary_password": "MasterKey#2026"
+        "secondary_password": test_pwd
     })
     assert set_prim.status_code == 200
 

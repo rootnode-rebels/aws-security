@@ -14,11 +14,13 @@ os.environ["SUPER_ADMIN_PASSWORD"] = "likitha@2005"
 from fastapi.testclient import TestClient
 from backend.app import app, seed_demo_user_if_needed
 from database.db_manager import db
+from backend.security.rate_limiter import rate_limiter
 
 class TestRootAdminAndDemoDeletion(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        rate_limiter.clear_all()
         os.environ["DEPLOYMENT_MODE"] = "DEVELOPMENT"
         cls.client = TestClient(app)
         admin_email = os.getenv("SUPER_ADMIN_EMAIL", "anushree2k5@gmail.com")

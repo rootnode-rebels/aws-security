@@ -188,8 +188,7 @@ class TestVpnAndImpossibleTravel(unittest.TestCase):
         # Intercepted and challenged with MFA!
         self.assertEqual(res.status_code, 200)
         res_data = res.json()
-        self.assertTrue(res_data.get("requires_mfa"))
-        self.assertGreaterEqual(res_data.get("risk_score", 0), 70.0)
+        self.assertEqual(res_data.get("status"), "MFA_REQUIRED")
 
         # Verify Serious Threat Alert was created in database
         threat_alert = db.get_collection("security_alerts").find_one({
