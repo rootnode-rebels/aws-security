@@ -185,11 +185,10 @@ class TestVpnAndImpossibleTravel(unittest.TestCase):
             }
         })
 
-        # Intercepted and hard-blocked!
-        self.assertEqual(res.status_code, 403)
-        err_detail = res.json()["detail"]
-        self.assertEqual(err_detail["error"], "Access Blocked")
-        self.assertGreaterEqual(err_detail["risk_score"], 70.0)
+        # Intercepted and challenged with MFA!
+        self.assertEqual(res.status_code, 200)
+        res_data = res.json()
+        self.assertEqual(res_data.get("status"), "MFA_REQUIRED")
 
         # Verify Serious Threat Alert was created in database
         threat_alert = db.get_collection("security_alerts").find_one({

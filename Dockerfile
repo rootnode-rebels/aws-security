@@ -19,6 +19,7 @@ ENV PATH=/root/.local/bin:$PATH
 # Copy application code
 COPY backend/ ./backend/
 COPY database/ ./database/
+COPY data/ ./data/
 COPY frontend/ ./frontend/
 COPY run_standalone.py .
 

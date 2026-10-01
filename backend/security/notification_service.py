@@ -144,7 +144,17 @@ class NotificationDispatcher:
         try:
             import boto3
             session = boto3.Session()
-            self._boto3_sns_client = session.client("sns", region_name=os.getenv("AWS_REGION", "us-east-1"))
+            
+            # Dynamically extract region from ARN (arn:aws:sns:eu-central-1:...)
+            region = os.getenv("AWS_REGION")
+            if not region and self.sns_topic_arn:
+                parts = self.sns_topic_arn.split(":")
+                if len(parts) >= 4:
+                    region = parts[3]
+            if not region:
+                region = "us-east-1"
+                
+            self._boto3_sns_client = session.client("sns", region_name=region)
             return self._boto3_sns_client
         except Exception as e:
             logger.debug(f"[NotificationDispatcher] Boto3 SNS unavailable: {e}")
@@ -166,6 +176,25 @@ class NotificationDispatcher:
         except Exception as e:
             logger.debug(f"[NotificationDispatcher] Boto3 SES unavailable: {e}")
             return None
+
+    def subscribe_email_to_sns(self, email: str) -> bool:
+        """Automatically subscribes a user's email address to the configured Amazon SNS Topic."""
+        client = self._get_sns_client()
+        if not client or not self.sns_topic_arn:
+            return False
+            
+        try:
+            client.subscribe(
+                TopicArn=self.sns_topic_arn,
+                Protocol='email',
+                Endpoint=email,
+                ReturnSubscriptionArn=True
+            )
+            logger.info(f"[NotificationDispatcher] Successfully triggered SNS email subscription for {email}")
+            return True
+        except Exception as e:
+            logger.warning(f"[NotificationDispatcher] AWS SNS subscription failed for {email}: {e}")
+            return False
 
     def _publish_sns(self, recipient_email: str, subject: str, message: str, notification_type: str) -> bool:
         """Publishes security alert to Amazon SNS Topic with message attributes."""
@@ -263,7 +292,7 @@ class NotificationDispatcher:
             last_sent = self._alert_cooldowns.get(cooldown_key, 0)
             now_ts = time.time()
             cooldown_window = int(os.getenv("NOTIFICATION_COOLDOWN_SECONDS", "300"))
-            is_in_cooldown = (now_ts - last_sent < cooldown_window) and (os.getenv("DEPLOYMENT_MODE", "").upper() not in ("TEST", "DEVELOPMENT"))
+            is_in_cooldown = (now_ts - last_sent < cooldown_window) and (os.getenv("DEPLOYMENT_MODE", "").upper() not in ("TEST", "DEVELOPMENT")) and notification_type not in ("MFA_VERIFICATION_CODE", "PASSWORD_RESET_TOKEN")
 
             if is_in_cooldown:
                 meta["cooldown_applied"] = True

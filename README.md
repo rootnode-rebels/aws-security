@@ -44,7 +44,8 @@
 - **Physical Feasibility Engine:** Uses high-precision Haversine geodetic distance and velocity scoring ($> 900\text{ km/h}$) to instantly identify impossible travel between logins.
 - **Explainable AI (XAI):** Every risk score is decomposed into transparent attribution weights, allowing SOC analysts to see exact anomaly drivers (e.g. `+45 pts: Intercontinental Velocity (8,500 km/h)`).
 - **Multi-Channel Alert Dispatch:** Seamlessly bridges in-app Server-Sent Events (SSE), Windows Toast Notifications, and out-of-band Amazon SNS / SES email alerts.
-- **Zero AWS Cloud Cost Local Mode:** Operates out-of-the-box with a built-in atomic document store, local GeoIP cache, and CloudWatch emulator—requiring no external cloud resources.
+- **Global MongoDB Cloud Architecture (NEW):** Decoupled local JSON files in favor of a seamlessly integrated, infinitely scalable MongoDB Atlas cluster deployed in the `ap-south-1` region for robust enterprise persistence.
+- **Zero AWS Cloud Cost Local Mode:** Operates out-of-the-box with a built-in atomic document store (now fully upgraded to MongoDB!), local GeoIP cache, and CloudWatch emulator.
 
 ---
 
