@@ -131,11 +131,6 @@ async def value_error_handler(request: Request, exc: ValueError):
 # Maintenance mode toggle for UX state demonstration
 MAINTENANCE_MODE = False
 
-KNOWN_SUPER_ADMIN_EMAILS = [
-    "superadmin@awssecurity.io",
-    "likhithadm@gmail.com"
-]
-
 def is_super_admin_account(email_or_user) -> bool:
     """Checks if an email or user dict matches the Super Admin role stored securely in database or env."""
     if isinstance(email_or_user, dict):
@@ -145,8 +140,6 @@ def is_super_admin_account(email_or_user) -> bool:
 
     if isinstance(email_or_user, str) and email_or_user.strip():
         e = email_or_user.strip().lower()
-        if e in KNOWN_SUPER_ADMIN_EMAILS:
-            return True
         admin_cfg = os.getenv("SUPER_ADMIN_EMAIL", "").strip().lower()
         if admin_cfg and e == admin_cfg:
             return True
@@ -159,83 +152,75 @@ def is_super_admin_account(email_or_user) -> bool:
     return False
 
 def seed_demo_user_if_needed(force: bool = False):
-    """Seeds and updates baseline superadmin and legitimate user accounts across local and live environments."""
-    now_iso = datetime.now(timezone.utc).isoformat()
-    configured_pwd = os.getenv("SUPER_ADMIN_PASSWORD", "SuperAdmin#SecurePassword2026!").strip()
-    if not configured_pwd:
-        configured_pwd = "SuperAdmin#SecurePassword2026!"
-
-    super_admins = [
-        ("superadmin@awssecurity.io", configured_pwd, "Super Administrator"),
-        ("likhithadm@gmail.com", "likitha@2005", "Super Administrator (Likhitha)")
-    ]
-
-    for adm_email, adm_pwd, adm_name in super_admins:
-        try:
-            adm_pw_hash, adm_salt = hash_password(adm_pwd)
-            existing_admin = db.users.find_one({"email": adm_email})
-            if not existing_admin:
-                superadmin_user = {
-                    "email": adm_email,
-                    "full_name": adm_name,
-                    "password_hash": adm_pw_hash,
-                    "salt": adm_salt,
-                    "secondary_password_hash": adm_pw_hash,
-                    "secondary_password_salt": adm_salt,
-                    "primary_device": None,
-                    "status": "ACTIVE",
+    """Seeds baseline legitimate user accounts for instant multi-browser testing."""
+    try:
+        import secrets
+        admin_email = os.getenv("SUPER_ADMIN_EMAIL", "superadmin@awssecurity.io").strip().lower()
+        admin_pwd = os.getenv("SUPER_ADMIN_PASSWORD")
+        if not admin_pwd:
+            admin_pwd = secrets.token_urlsafe(16)
+            print(f"\n[SECURITY WARNING] No SUPER_ADMIN_PASSWORD set in .env! Generated secure temporary password: {admin_pwd}\n")
+        existing_admin = db.users.find_one({"email": admin_email})
+        adm_pw_hash, adm_salt = hash_password(admin_pwd)
+        adm_sec_hash, adm_sec_salt = hash_password(admin_pwd)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if not existing_admin:
+            superadmin_user = {
+                "email": admin_email,
+                "full_name": "Super Administrator",
+                "password_hash": adm_pw_hash,
+                "salt": adm_salt,
+                "secondary_password_hash": adm_sec_hash,
+                "secondary_password_salt": adm_sec_salt,
+                "primary_device": None,
+                "status": "ACTIVE",
+                "role": "SUPER_ADMIN",
+                "is_root_admin": True,
+                "is_super_admin": True,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+                "trusted_devices": [],
+                "last_successful_login": None,
+                "mfa_secret": None,
+                "mfa_pending": None,
+                "mfa_enabled": False,
+                "email_verification_code": None
+            }
+            db.users.insert_one(superadmin_user)
+            print(f"[AWSSecurity] Seeded Super Admin: {admin_email} / [SECURED]")
+        else:
+            db.users.update_one(
+                {"email": admin_email},
+                {"$set": {
                     "role": "SUPER_ADMIN",
                     "is_root_admin": True,
                     "is_super_admin": True,
-                    "created_at": now_iso,
-                    "updated_at": now_iso,
-                    "trusted_devices": [],
-                    "last_successful_login": None,
-                    "mfa_secret": None,
-                    "mfa_pending": None,
-                    "mfa_enabled": False,
-                    "email_verification_code": None
-                }
-                db.users.insert_one(superadmin_user)
-                print(f"[AWSSecurity] Seeded Super Admin: {adm_email} / [ACTIVE]")
-            else:
-                db.users.update_one(
-                    {"email": adm_email},
-                    {"$set": {
-                        "role": "SUPER_ADMIN",
-                        "is_root_admin": True,
-                        "is_super_admin": True,
-                        "status": "ACTIVE",
-                        "password_hash": adm_pw_hash,
-                        "salt": adm_salt,
-                        "secondary_password_hash": adm_pw_hash,
-                        "secondary_password_salt": adm_salt,
-                        "mfa_pending": None,
-                        "updated_at": now_iso
-                    }}
-                )
-                print(f"[AWSSecurity] Verified Super Admin active: {adm_email} / [ACTIVE]")
-        except Exception as e:
-            print(f"[AWSSecurity] Super admin seed error ({adm_email}): {e}")
+                    "status": "ACTIVE"
+                }}
+            )
+            print(f"[AWSSecurity] Verified Super Admin active: {admin_email} / [SECURED]")
+    except Exception as e:
+        print(f"[AWSSecurity] Super admin seed notice: {e}")
 
-    # Seed baseline demo accounts if database is fresh or forced
-    try:
-        user_count = db.users.count_documents({})
-        if not force and user_count > len(super_admins):
-            return
-    except Exception:
-        pass
+    # If not forced and accounts already exist, do not reseed demo accounts
+    if not force and db.users.count_documents({}) > 1:
+        return
+
+    # Preserved dynamic DB assignments intact without aggressive startup demotions
 
     accounts = [
         ("demouser@mail.com", "DemoUser.AWS@29", "AWS Presentation Demo User", "USER"),
         ("demo@awssecurity.io", os.getenv("DEMO_PWD_1", "AWSSecurity#2026"), "Demo Security Lead", "ROOT_ADMIN"),
-        ("demo@aegisguard.io", os.getenv("DEMO_PWD_2", "AWSSecurity#2026"), "Demo Account", "ROOT_ADMIN")
+        ("demo@aegisguard.io", os.getenv("DEMO_PWD_2", "AWSSecurity#2026"), "Demo Account", "ROOT_ADMIN"),
+        (admin_email, admin_pwd, "Super Administrator", "SUPER_ADMIN")
     ]
     for email, pwd, name, role in accounts:
         try:
             existing = db.users.find_one({"email": email})
-            sec_hash, sec_salt = hash_password(pwd)
+            sec_hash, sec_salt = hash_password(os.getenv("DEFAULT_SEC_PWD", secrets.token_urlsafe(16)))
             pw_hash, pw_salt = hash_password(pwd)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            is_super_admin = (role == "SUPER_ADMIN")
 
             if not existing:
                 demo_user = {
@@ -249,7 +234,7 @@ def seed_demo_user_if_needed(force: bool = False):
                     "status": "ACTIVE",
                     "role": role,
                     "is_root_admin": True if role == "ROOT_ADMIN" else False,
-                    "is_super_admin": False,
+                    "is_super_admin": is_super_admin,
                     "created_at": now_iso,
                     "updated_at": now_iso,
                     "trusted_devices": [],
@@ -265,6 +250,11 @@ def seed_demo_user_if_needed(force: bool = False):
                 if existing.get("role") != role:
                     updates["role"] = role
                     updates["is_root_admin"] = True if role == "ROOT_ADMIN" else False
+                    updates["is_super_admin"] = is_super_admin
+                if not existing.get("secondary_password_hash"):
+                    updates["secondary_password_hash"] = sec_hash
+                    updates["secondary_password_salt"] = sec_salt
+                # Clear out dummy seeded browser_id so user's real browser can enroll as Main Device
                 prim = existing.get("primary_device")
                 if prim and prim.get("browser_id") == "chrome_uuid_legit_001":
                     updates["primary_device"] = None
@@ -279,7 +269,7 @@ def seed_demo_user_if_needed(force: bool = False):
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
     except Exception as e:
-        pass
+        print(f"[AWSSecurity] system_metadata insert notice: {e}")
 
 seed_demo_user_if_needed()
 
@@ -792,11 +782,6 @@ def login(payload: LoginSchema, request: Request):
     ]
     autoencoder_res = tf_autoencoder.compute_reconstruction_loss(feature_vector)
 
-    if is_super_admin_target:
-        risk_score = 0.0
-        risk_action = "ALLOW"
-        risk_level = "LOW"
-
     # Record security event in audit collection
     event_id = f"evt_{int(time.time() * 1000)}"
     sec_event = {
@@ -808,7 +793,7 @@ def login(payload: LoginSchema, request: Request):
         "risk_score": risk_score,
         "risk_level": risk_level,
         "action_taken": risk_action,
-        "factors": ml_eval["explainable_factors"] if not is_super_admin_target else [],
+        "factors": ml_eval["explainable_factors"],
         "autoencoder_loss": autoencoder_res["mse_reconstruction_error"],
         "device": fingerprint.get("os", "Unknown Device")
     }
@@ -825,54 +810,7 @@ def login(payload: LoginSchema, request: Request):
 
     # 5. Check credentials with timing-attack defense (Anti-Enumeration)
     credentials_valid = False
-    valid_superadmin_pwds = [
-        os.getenv("SUPER_ADMIN_PASSWORD", "SuperAdmin#SecurePassword2026!").strip(),
-        "SuperAdmin#SecurePassword2026!",
-        "likitha@2005"
-    ]
-    if is_super_admin_target:
-        # If superadmin user is missing in DB (e.g. freshly connected MongoDB cluster), auto-provision immediately
-        if not user:
-            now_iso = datetime.now(timezone.utc).isoformat()
-            adm_pw_hash, adm_salt = hash_password(valid_superadmin_pwds[0])
-            user = {
-                "email": email,
-                "full_name": "Super Administrator",
-                "password_hash": adm_pw_hash,
-                "salt": adm_salt,
-                "secondary_password_hash": adm_pw_hash,
-                "secondary_password_salt": adm_salt,
-                "primary_device": None,
-                "status": "ACTIVE",
-                "role": "SUPER_ADMIN",
-                "is_root_admin": True,
-                "is_super_admin": True,
-                "created_at": now_iso,
-                "updated_at": now_iso,
-                "trusted_devices": [],
-                "last_successful_login": None,
-                "mfa_secret": None,
-                "mfa_pending": None,
-                "mfa_enabled": False,
-                "email_verification_code": None
-            }
-            try:
-                db.users.insert_one(user)
-            except Exception:
-                pass
-        else:
-            # Super Admin is always ACTIVE and cannot be locked out
-            if user.get("status") != "ACTIVE" or user.get("mfa_pending"):
-                db.users.update_one({"email": email}, {"$set": {"status": "ACTIVE", "mfa_pending": None}})
-                user["status"] = "ACTIVE"
-                user["mfa_pending"] = None
-
-        if raw_password in valid_superadmin_pwds:
-            credentials_valid = True
-        elif user and user.get("password_hash") and user.get("salt"):
-            credentials_valid = verify_password(raw_password, user["password_hash"], user["salt"])
-
-    elif user and user.get("status") != "LOCKED":
+    if user and user.get("status") != "LOCKED":
         credentials_valid = verify_password(raw_password, user["password_hash"], user["salt"])
     elif user and user.get("status") == "LOCKED":
         # Check if credentials are correct for locked account to give actionable feedback
@@ -1123,14 +1061,7 @@ def login(payload: LoginSchema, request: Request):
     session_expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
 
     is_dummy_seeded = bool(primary_device and primary_device.get("browser_id") == "chrome_uuid_legit_001")
-    if is_super_admin_login:
-        # SUPER ADMIN: Universal unrestricted access from anywhere, anytime, any device, any number of times!
-        prompt_primary_device = False
-        device_tier = "PRIMARY"
-        is_primary = True
-        device_label = f"Super Admin Console ({device_name})"
-        session_expires_at = (datetime.now(timezone.utc) + timedelta(days=365)).isoformat()
-    elif not primary_device or is_dummy_seeded:
+    if not primary_device or is_dummy_seeded:
         # First sign-in -> enroll current browser as Main Device
         prompt_primary_device = True
         device_tier = "PRIMARY"
