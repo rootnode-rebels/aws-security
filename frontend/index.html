@@ -1357,6 +1357,32 @@
           </table>
         </div>
       </div>
+
+      <!-- God Mode Approvals Panel (Only visible to ROOT_OWNER) -->
+      <div id="godmode-approvals-panel" class="cyber-card" style="margin-top: 1.5rem; display: none; border: 1px solid rgba(245, 158, 11, 0.3);">
+        <div class="card-header" style="border-bottom-color: rgba(245, 158, 11, 0.2);">
+          <div class="card-title" style="color: var(--accent-amber);">
+            <span style="font-size: 1.3rem;">👑</span>
+            <span>God Mode Approval Queue</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span id="godmode-pending-count" class="badge badge-medium font-mono" style="color: var(--accent-amber); border-color: rgba(245, 158, 11, 0.4);">0 Pending</span>
+            <button class="btn btn-secondary btn-sm" onclick="godmodeLoadApprovals()" title="Refresh pending approvals">
+              <span class="material-symbols-outlined" style="font-size: 1rem;">refresh</span>
+              <span>Refresh</span>
+            </button>
+          </div>
+        </div>
+        <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
+          Super Admin requests that require your explicit authorization before execution. Review each request carefully before approving or rejecting.
+        </p>
+        <div id="godmode-approvals-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
+          <div style="text-align: center; color: var(--text-muted); padding: 2rem 0; font-size: 0.85rem;">
+            No pending approval requests.
+          </div>
+        </div>
+      </div>
+
     </section>
 
     <!-- VIEW 7: 404 NOT FOUND -->

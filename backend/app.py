@@ -1087,13 +1087,13 @@ def login(payload: LoginSchema, request: Request):
             # A device MUST possess the cryptographic browser_id token in LocalStorage to be Primary.
             matches_primary = False
 
-        if matches_primary:
+        if is_super_admin_login or matches_primary:
             device_tier = "PRIMARY"
             is_primary = True
             device_label = f"Primary Security Portal ({device_name})"
             session_expires_at = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
         else:
-            # Secondary device login: MUST BE APPROVED BY PRIMARY DEVICE!
+            # Secondary device login for standard users: MUST BE APPROVED BY PRIMARY DEVICE!
             otp = generate_mfa_code()
             temp_token = generate_session_token()
             now_iso = datetime.now(timezone.utc).isoformat()
@@ -1178,6 +1178,11 @@ def login(payload: LoginSchema, request: Request):
 
     rate_limiter.record_success(client_ip)
     rate_limiter.record_success(f"acct:{email}")
+
+    # Single Active Session Enforcement for Admins (Auto logout all prior sessions on other devices)
+    if is_super_admin_login:
+        db.active_sessions.delete_many({"user_email": email})
+
     session_token = generate_session_token()
     session_id = f"sess_{int(time.time()*1000)}"
 
@@ -1226,6 +1231,7 @@ def login(payload: LoginSchema, request: Request):
             "role": user.get("role", "SUPER_ADMIN" if is_super_admin_login else "ROOT_ADMIN"),
             "is_root_admin": user.get("is_root_admin", True),
             "is_super_admin": bool(user.get("is_super_admin") or is_super_admin_login),
+            "require_password_change": user.get("require_password_change", False),
             "primary_device": user.get("primary_device"),
             "device_tier": device_tier,
             "is_primary_device": is_primary
@@ -1273,10 +1279,18 @@ def verify_mfa(payload: VerifyMFASchema):
     session_token = generate_session_token()
     session_id = f"sess_{int(time.time()*1000)}"
 
-    has_primary = bool(user.get("primary_device"))
-    device_tier = "SECONDARY" if has_primary else "PRIMARY"
-    is_primary = False if has_primary else True
-    session_expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat() if is_primary else (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    is_super_admin_login = is_super_admin_account(user)
+    if is_super_admin_login:
+        db.active_sessions.delete_many({"user_email": email})
+        device_tier = "PRIMARY"
+        is_primary = True
+        session_expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    else:
+        has_primary = bool(user.get("primary_device"))
+        device_tier = "SECONDARY" if has_primary else "PRIMARY"
+        is_primary = False if has_primary else True
+        session_expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat() if is_primary else (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+
     dev_label = mfa_state.get("device_label") or dev_name
 
     db.active_sessions.insert_one({
@@ -1342,6 +1356,7 @@ def verify_mfa(payload: VerifyMFASchema):
         "token": session_token,
         "device_tier": device_tier,
         "is_primary_device": is_primary,
+        "require_password_change": user.get("require_password_change", False),
         "message": "Identity confirmed via Verification Code. Access granted."
     }
 
@@ -1501,6 +1516,18 @@ def unlock_self(request: Request, user: Dict[str, Any] = Depends(get_current_use
 def forgot_password(payload: ForgotPasswordSchema, request: Request):
     client_ip = request.client.host if request.client else "127.0.0.1"
     email = sanitize_email(payload.email)
+    
+    # Strict Anti-Spam Rate Limiting (Prevents SNS abuse / Email Bombing)
+    is_locked_ip, _ = rate_limiter.is_locked(f"reset:{client_ip}")
+    is_locked_acct, _ = rate_limiter.is_locked(f"reset:{email}")
+    if is_locked_ip or is_locked_acct:
+        # Silently drop the request to prevent enumeration or spam, while appearing successful
+        return {"status": "SUCCESS", "message": f"If an account exists for {email}, a secure password reset link has been dispatched via Amazon SNS."}
+
+    # Record the attempt
+    rate_limiter.record_failure(f"reset:{client_ip}")
+    rate_limiter.record_failure(f"reset:{email}")
+
     user = db.users.find_one({"email": email})
 
     # Anti-enumeration response: always return the same success message regardless of existence
@@ -1609,6 +1636,8 @@ def change_password(payload: ChangePasswordSchema, request: Request, user: Dict[
             "password_hash": new_hash,
             "salt": new_salt,
             "status": "ACTIVE",
+            "require_password_change": False,
+            "is_temp_password": False,
             "updated_at": now_iso
         }}
     )
@@ -1643,13 +1672,23 @@ def get_me(authorization: Optional[str] = Header(None), user: Dict[str, Any] = D
     is_primary = current_session.get("is_primary_device", True) if current_session else True
 
     is_super = is_super_admin_account(user)
+    raw_role = user.get("role")
+    if raw_role == "ROOT_OWNER":
+        user_role = "ROOT_OWNER"
+    elif is_super:
+        user_role = "SUPER_ADMIN"
+    else:
+        user_role = raw_role or "ROOT_ADMIN"
+
     return {
         "email": user["email"],
         "full_name": user["full_name"],
         "status": user["status"],
-        "role": "SUPER_ADMIN" if is_super else user.get("role", "ROOT_ADMIN"),
+        "role": user_role,
+        "is_root_owner": (user_role == "ROOT_OWNER"),
         "is_root_admin": user.get("is_root_admin", True),
         "is_super_admin": is_super,
+        "require_password_change": user.get("require_password_change", False),
         "created_at": user.get("created_at"),
         "last_login": user.get("last_successful_login"),
         "trusted_devices_count": len(user.get("trusted_devices", [])),
@@ -2291,15 +2330,17 @@ def simulate_attack(payload: SimulateAttackSchema, auth_user: Optional[Dict[str,
 
     # If action is BLOCK or STEP_UP, inject alert into user's alert inbox
     if action in ("BLOCK_SESSION", "STEP_UP_MFA"):
+        city_str = str((simulated_geo or {}).get("city") or "Unknown")
+        country_str = str((simulated_geo or {}).get("country") or "Unknown")
         sim_alert = {
             "alert_id": f"alt_sim_{int(time.time()*1000)}",
             "user_email": email,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "type": f"SIMULATED_{attack_type}",
             "risk_score": score,
-            "origin": simulated_geo.get("city", "Unknown") + ", " + simulated_geo.get("country", "Unknown"),
+            "origin": f"{city_str}, {country_str}",
             "ip": simulated_ip,
-            "device": simulated_fp.get("os", "Unknown"),
+            "device": (simulated_fp or {}).get("os") or "Unknown",
             "status": "UNRESOLVED",
             "reason": f"Simulated {attack_type} detected by ML Engine.",
             "factors": ml_res["explainable_factors"]
@@ -2322,7 +2363,7 @@ def simulate_attack(payload: SimulateAttackSchema, auth_user: Optional[Dict[str,
             notif = notification_service.send_mfa_code(
                 email=email,
                 otp="654321",
-                device_name=simulated_fp.get("os", "Simulated Vector"),
+                device_name=(simulated_fp or {}).get("os") or "Simulated Vector",
                 geo=simulated_geo,
                 client_ip=simulated_ip
             )
@@ -2503,8 +2544,30 @@ def check_super_admin(user: Dict[str, Any] = Depends(get_current_user)):
     return user
 
 @app.post("/api/system/maintenance")
-def toggle_maintenance(enable: bool, user: Dict[str, Any] = Depends(check_root_owner)):
+def toggle_maintenance(enable: bool, user: Dict[str, Any] = Depends(check_super_admin)):
     global MAINTENANCE_MODE
+
+    if user.get("role") != "ROOT_OWNER":
+        req_id = f"req_{int(datetime.now(timezone.utc).timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
+        db.admin_requests.insert_one({
+            "_id": req_id,
+            "requested_by": user.get("email"),
+            "action_type": "TOGGLE_MAINTENANCE",
+            "target_identifier": f"{'ENABLE' if enable else 'DISABLE'} Maintenance Mode",
+            "status": "PENDING",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "_enable": enable
+        })
+        god_admin = db.users.find_one({"role": "ROOT_OWNER"})
+        if god_admin and "email" in god_admin:
+            notification_service.dispatch(
+                recipient_email=god_admin["email"],
+                subject="[AWSSecurity] God Mode Approval Required: Maintenance Mode",
+                body_text=f"Super Admin {user.get('email')} has requested to {'ENABLE' if enable else 'DISABLE'} Maintenance Mode.\nRequest ID: {req_id}",
+                notification_type="SECURITY_NOTIFICATION"
+            )
+        return {"status": "PENDING_APPROVAL", "message": "Maintenance mode toggle requires God Mode Admin approval. Request submitted."}
+
     MAINTENANCE_MODE = enable
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
@@ -2526,16 +2589,19 @@ def cms_get_users(user: Dict[str, Any] = Depends(check_super_admin)):
     users = db.users.find()
     safe_users = []
     for u in users:
-        u.pop("password_hash", None)
-        u.pop("salt", None)
-        u.pop("secondary_password_hash", None)
-        u.pop("secondary_password_salt", None)
-        u.pop("mfa_secret", None)
-        u.pop("mfa_pending", None)
-        u["role"] = u.get("role", "USER")
-        u["is_root_admin"] = u.get("is_root_admin", False)
-        u["mfa_enabled"] = u.get("mfa_enabled", True)
-        safe_users.append(u)
+        u_copy = dict(u)
+        if "_id" in u_copy:
+            u_copy["_id"] = str(u_copy["_id"])
+        u_copy.pop("password_hash", None)
+        u_copy.pop("salt", None)
+        u_copy.pop("secondary_password_hash", None)
+        u_copy.pop("secondary_password_salt", None)
+        u_copy.pop("mfa_secret", None)
+        u_copy.pop("mfa_pending", None)
+        u_copy["role"] = u_copy.get("role", "USER")
+        u_copy["is_root_admin"] = u_copy.get("is_root_admin", False)
+        u_copy["mfa_enabled"] = u_copy.get("mfa_enabled", True)
+        safe_users.append(u_copy)
     return safe_users
 
 @app.post("/api/cms/users/{email}/unlock")
@@ -2544,6 +2610,26 @@ def cms_unlock_user(email: str, admin: Dict[str, Any] = Depends(check_super_admi
     target_user = db.users.find_one({"email": clean_email})
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found.")
+
+    if admin.get("role") != "ROOT_OWNER":
+        req_id = f"req_{int(datetime.now(timezone.utc).timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
+        db.admin_requests.insert_one({
+            "_id": req_id,
+            "requested_by": admin.get("email"),
+            "action_type": "UNLOCK_USER",
+            "target_identifier": clean_email,
+            "status": "PENDING",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        god_admin = db.users.find_one({"role": "ROOT_OWNER"})
+        if god_admin and "email" in god_admin:
+            notification_service.dispatch(
+                recipient_email=god_admin["email"],
+                subject="[AWSSecurity] God Mode Approval Required: Unlock User",
+                body_text=f"Super Admin {admin.get('email')} has requested to unlock user {clean_email}.\nRequest ID: {req_id}\n\nPlease review this action in the God Mode Approvals dashboard.",
+                notification_type="SECURITY_NOTIFICATION"
+            )
+        return {"status": "PENDING_APPROVAL", "message": "Unlock requires God Mode Admin approval. Request submitted."}
 
     db.users.update_one(
         {"email": clean_email},
@@ -2560,12 +2646,39 @@ def cms_unlock_user(email: str, admin: Dict[str, Any] = Depends(check_super_admi
     return {"status": "SUCCESS", "message": f"Account {clean_email} successfully unlocked and restored to ACTIVE status."}
 
 @app.delete("/api/cms/users/{email}")
-def cms_delete_user(email: str, admin: Dict[str, Any] = Depends(check_root_owner)):
+def cms_delete_user(email: str, admin: Dict[str, Any] = Depends(check_super_admin)):
     clean_email = sanitize_email(email)
     target_user = db.users.find_one({"email": clean_email})
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found.")
 
+    if admin.get("role") != "ROOT_OWNER":
+        # Dual-Control Intercept: Super Admin Maker Request
+        req_id = f"req_{int(datetime.now(timezone.utc).timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
+        db.admin_requests.insert_one({
+            "_id": req_id,
+            "requested_by": admin.get("email"),
+            "action_type": "DELETE_USER",
+            "target_identifier": clean_email,
+            "status": "PENDING",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        cloudwatch.put_log_event(
+            log_group="/aws/lambda/AuthHandler",
+            level="INFO",
+            message=f"[CMS Maker-Checker] Super Admin {admin.get('email')} submitted deletion request for {clean_email}."
+        )
+        god_admin = db.users.find_one({"role": "ROOT_OWNER"})
+        if god_admin and "email" in god_admin:
+            notification_service.dispatch(
+                recipient_email=god_admin["email"],
+                subject="🛡️ [AWSSecurity] God Mode Approval Required: User Deletion",
+                body_text=f"Super Admin {admin.get('email')} has requested to delete user {clean_email}.\nRequest ID: {req_id}\n\nPlease review this action in the God Mode Approvals dashboard.",
+                notification_type="SECURITY_NOTIFICATION"
+            )
+        return {"status": "PENDING_APPROVAL", "message": "High-privilege action requires God Mode Admin approval. Request submitted successfully."}
+
+    # God Mode Admin execution
     db.active_sessions.delete_many({"user_email": clean_email})
     db.security_events.delete_many({"user_email": clean_email})
     db.get_collection("security_alerts").delete_many({"user_email": clean_email})
@@ -2613,6 +2726,27 @@ def cms_terminate_session(session_id: str, admin: Dict[str, Any] = Depends(check
     if not target:
         raise HTTPException(status_code=404, detail="Session not found or already terminated.")
 
+    if admin.get("role") != "ROOT_OWNER":
+        req_id = f"req_{int(datetime.now(timezone.utc).timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
+        db.admin_requests.insert_one({
+            "_id": req_id,
+            "requested_by": admin.get("email"),
+            "action_type": "TERMINATE_SESSION",
+            "target_identifier": f"{session_id} ({target.get('user_email', 'unknown')})",
+            "status": "PENDING",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "_session_id": session_id
+        })
+        god_admin = db.users.find_one({"role": "ROOT_OWNER"})
+        if god_admin and "email" in god_admin:
+            notification_service.dispatch(
+                recipient_email=god_admin["email"],
+                subject="[AWSSecurity] God Mode Approval Required: Terminate Session",
+                body_text=f"Super Admin {admin.get('email')} has requested to terminate session {session_id} (User: {target.get('user_email', 'unknown')}).\nRequest ID: {req_id}",
+                notification_type="SECURITY_NOTIFICATION"
+            )
+        return {"status": "PENDING_APPROVAL", "message": "Session termination requires God Mode Admin approval. Request submitted."}
+
     db.active_sessions.delete_one({"session_id": session_id})
 
     # Broadcast session revocation to the affected user
@@ -2636,6 +2770,28 @@ def cms_edit_session(session_id: str, payload: CMSEditSessionSchema, admin: Dict
     target = db.active_sessions.find_one({"session_id": session_id})
     if not target:
         raise HTTPException(status_code=404, detail="Session not found.")
+
+    if admin.get("role") != "ROOT_OWNER":
+        req_id = f"req_{int(datetime.now(timezone.utc).timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
+        db.admin_requests.insert_one({
+            "_id": req_id,
+            "requested_by": admin.get("email"),
+            "action_type": "EDIT_SESSION",
+            "target_identifier": f"{session_id} ({target.get('user_email', 'unknown')})",
+            "status": "PENDING",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "_session_id": session_id,
+            "_payload": {"device": payload.device, "device_tier": payload.device_tier, "status": payload.status}
+        })
+        god_admin = db.users.find_one({"role": "ROOT_OWNER"})
+        if god_admin and "email" in god_admin:
+            notification_service.dispatch(
+                recipient_email=god_admin["email"],
+                subject="[AWSSecurity] God Mode Approval Required: Edit Session",
+                body_text=f"Super Admin {admin.get('email')} has requested to edit session {session_id} (User: {target.get('user_email', 'unknown')}).\nRequest ID: {req_id}",
+                notification_type="SECURITY_NOTIFICATION"
+            )
+        return {"status": "PENDING_APPROVAL", "message": "Session edit requires God Mode Admin approval. Request submitted."}
 
     updates = {}
     if payload.device is not None and payload.device.strip():
@@ -2661,9 +2817,9 @@ def cms_edit_session(session_id: str, payload: CMSEditSessionSchema, admin: Dict
 
 @app.get("/api/cms/stats")
 def cms_get_stats(user: Dict[str, Any] = Depends(check_super_admin)):
-    total_users = db.users.count_documents()
-    active_sessions = db.active_sessions.count_documents()
-    total_events = db.security_events.count_documents()
+    total_users = db.users.count_documents({})
+    active_sessions = db.active_sessions.count_documents({})
+    total_events = db.security_events.count_documents({})
     blocked_hijacks = db.security_events.count_documents({"action_taken": "BLOCK_SESSION"})
     
     return {
@@ -2705,21 +2861,176 @@ def serve_spa(full_path: str):
         return response
     return JSONResponse({"message": "Frontend index.html not yet built."}, status_code=404)
 
-if __name__ == "__main__":
-    import uvicorn
-    print("[AWSSecurity] Starting serverless web application on http://127.0.0.1:8000 ...")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
 @app.get("/api/temp-reset")
-def temp_reset():
+def temp_reset(admin: Dict[str, Any] = Depends(check_super_admin)):
+    if admin.get("role") != "ROOT_OWNER":
+        req_id = f"req_{int(datetime.now(timezone.utc).timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
+        db.admin_requests.insert_one({
+            "_id": req_id,
+            "requested_by": admin.get("email"),
+            "action_type": "TEMP_RESET",
+            "target_identifier": "GLOBAL",
+            "status": "PENDING",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        cloudwatch.put_log_event(
+            log_group="/aws/lambda/AuthHandler",
+            level="INFO",
+            message=f"[CMS Maker-Checker] Super Admin {admin.get('email')} submitted TEMP_RESET request."
+        )
+        god_admin = db.users.find_one({"role": "ROOT_OWNER"})
+        if god_admin and "email" in god_admin:
+            notification_service.dispatch(
+                recipient_email=god_admin["email"],
+                subject="🛡️ [AWSSecurity] God Mode Approval Required: Database Reset",
+                body_text=f"Super Admin {admin.get('email')} has requested to execute a TEMP_RESET on the database.\nRequest ID: {req_id}\n\nPlease review this action in the God Mode Approvals dashboard.",
+                notification_type="SECURITY_NOTIFICATION"
+            )
+        return {"status": "PENDING_APPROVAL", "msg": "High-privilege action requires God Mode Admin approval. Request submitted successfully."}
+
     from backend.security.auth import hash_password
     db_users = db.get_collection('users')
     
     pwd_hash, salt = hash_password('TempAdmin#2026')
     sec_hash, sec_salt = hash_password('Secondary#2026')
-    db_users.update_one({'email': 'anushree2k5@gmail.com'}, {'$set': {'password_hash': pwd_hash, 'salt': salt, 'secondary_password_hash': sec_hash, 'secondary_password_salt': sec_salt}})
+    db_users.update_one({'email': 'anushree2k5@gmail.com'}, {'$set': {'password_hash': pwd_hash, 'salt': salt, 'secondary_password_hash': sec_hash, 'secondary_password_salt': sec_salt, 'require_password_change': True, 'is_temp_password': True}})
 
     pwd_hash2, salt2 = hash_password('Developer#2026')
     sec_hash2, sec_salt2 = hash_password('Secondary#2026')
-    db_users.update_one({'email': 'adhiam@outlook.in'}, {'$set': {'password_hash': pwd_hash2, 'salt': salt2, 'secondary_password_hash': sec_hash2, 'secondary_password_salt': sec_salt2}})
+    db_users.update_one({'email': 'adhiam@outlook.in'}, {'$set': {'password_hash': pwd_hash2, 'salt': salt2, 'secondary_password_hash': sec_hash2, 'secondary_password_salt': sec_salt2, 'require_password_change': True, 'is_temp_password': True}})
     
-    return {"status": "success", "msg": "passwords rehashed in memory"}
+    return {"status": "success", "msg": "Temporary passwords assigned; mandatory password change on first login enabled for both admins."}
+
+# =========================================================================
+# God Mode (Maker-Checker) Approval Endpoints
+# =========================================================================
+
+@app.get("/api/cms/approvals")
+def list_admin_approvals(admin: Dict[str, Any] = Depends(check_root_owner)):
+    """List all pending destructive actions requested by Super Admins."""
+    requests = db.admin_requests.find({"status": "PENDING"})
+    clean_reqs = []
+    for r in requests:
+        r_copy = dict(r)
+        if "_id" in r_copy:
+            r_copy["_id"] = str(r_copy["_id"])
+        clean_reqs.append(r_copy)
+    return {"status": "SUCCESS", "data": clean_reqs}
+
+@app.post("/api/cms/approvals/{request_id}/approve")
+def approve_admin_request(request_id: str, admin: Dict[str, Any] = Depends(check_root_owner)):
+    """God Mode Admin approves and executes a pending request."""
+    req = db.admin_requests.find_one({"_id": request_id, "status": "PENDING"})
+    if not req:
+        raise HTTPException(status_code=404, detail="Pending request not found.")
+
+    # 1. Execute the requested action!
+    action = req.get("action_type")
+    target = req.get("target_identifier")
+    
+    if action == "DELETE_USER":
+        db.active_sessions.delete_many({"user_email": target})
+        db.security_events.delete_many({"user_email": target})
+        db.get_collection("security_alerts").delete_many({"user_email": target})
+        db.password_resets.delete_many({"email": target})
+        db.get_collection("dispatched_notifications").delete_many({"recipient_email": target})
+        db.users.delete_one({"email": target})
+        msg = f"User {target} and all active sessions were successfully deleted."
+    
+    elif action == "UNLOCK_USER":
+        db.users.update_one(
+            {"email": target},
+            {"$set": {"status": "ACTIVE", "updated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        rate_limiter.record_success(f"acct:{target}")
+        msg = f"Account {target} successfully unlocked and restored to ACTIVE."
+
+    elif action == "TERMINATE_SESSION":
+        sid = req.get("_session_id", "")
+        sess = db.active_sessions.find_one({"session_id": sid})
+        if sess:
+            db.active_sessions.delete_one({"session_id": sid})
+            broadcaster.broadcast_sync(sess.get("user_email"), {
+                "type": "SESSION_REVOKED",
+                "session_id": sid,
+                "reason": f"Session terminated by God Mode Administrator ({admin.get('email')}) via approved request."
+            })
+        msg = f"Session {sid} terminated successfully."
+
+    elif action == "EDIT_SESSION":
+        sid = req.get("_session_id", "")
+        payload_data = req.get("_payload", {})
+        updates = {}
+        if payload_data.get("device") and str(payload_data["device"]).strip():
+            updates["device"] = str(payload_data["device"]).strip()
+        if payload_data.get("device_tier"):
+            tier = str(payload_data["device_tier"]).strip().upper()
+            if tier in ("PRIMARY", "SECONDARY"):
+                updates["device_tier"] = tier
+                updates["is_primary_device"] = (tier == "PRIMARY")
+        if payload_data.get("status") and str(payload_data["status"]).strip():
+            updates["status"] = str(payload_data["status"]).strip().upper()
+        if updates:
+            db.active_sessions.update_one({"session_id": sid}, {"$set": updates})
+        msg = f"Session {sid} updated successfully with: {updates}"
+
+    elif action == "TOGGLE_MAINTENANCE":
+        global MAINTENANCE_MODE
+        enable = req.get("_enable", False)
+        MAINTENANCE_MODE = enable
+        msg = f"Maintenance mode {'ENABLED' if enable else 'DISABLED'} successfully."
+
+    elif action == "TEMP_RESET":
+        from backend.security.auth import hash_password
+        pwd_hash, salt = hash_password('TempAdmin#2026')
+        sec_hash, sec_salt = hash_password('Secondary#2026')
+        db.users.update_one({'email': 'anushree2k5@gmail.com'}, {'$set': {'password_hash': pwd_hash, 'salt': salt, 'secondary_password_hash': sec_hash, 'secondary_password_salt': sec_salt, 'require_password_change': True, 'is_temp_password': True}})
+
+        pwd_hash2, salt2 = hash_password('Developer#2026')
+        sec_hash2, sec_salt2 = hash_password('Secondary#2026')
+        db.users.update_one({'email': 'adhiam@outlook.in'}, {'$set': {'password_hash': pwd_hash2, 'salt': salt2, 'secondary_password_hash': sec_hash2, 'secondary_password_salt': sec_salt2, 'require_password_change': True, 'is_temp_password': True}})
+        msg = "Database TEMP_RESET executed successfully. Mandatory password change enabled for both admin accounts."
+    else:
+        raise HTTPException(status_code=400, detail="Unknown action type.")
+
+    # 2. Update status
+    db.admin_requests.update_one({"_id": request_id}, {"$set": {"status": "APPROVED", "resolved_at": datetime.now(timezone.utc).isoformat(), "resolved_by": admin.get("email")}})
+
+    # 3. Notify the Maker (Super Admin)
+    super_admin_email = req.get("requested_by")
+    notification_service.dispatch(
+        recipient_email=super_admin_email,
+        subject="✅ [AWSSecurity] Request Approved & Executed",
+        body_text=f"Hello,\n\nYour recent administrative request has been APPROVED by the God Mode Administrator.\n\nRequest ID: {request_id}\nAction: {action} on {target}\n\nThe action has been fully executed on the database.",
+        notification_type="SECURITY_NOTIFICATION"
+    )
+
+    return {"status": "SUCCESS", "message": f"Request {request_id} approved and executed. Super Admin notified."}
+
+@app.post("/api/cms/approvals/{request_id}/reject")
+def reject_admin_request(request_id: str, admin: Dict[str, Any] = Depends(check_root_owner)):
+    """God Mode Admin rejects a pending request."""
+    req = db.admin_requests.find_one({"_id": request_id, "status": "PENDING"})
+    if not req:
+        raise HTTPException(status_code=404, detail="Pending request not found.")
+
+    db.admin_requests.update_one({"_id": request_id}, {"$set": {"status": "REJECTED", "resolved_at": datetime.now(timezone.utc).isoformat(), "resolved_by": admin.get("email")}})
+
+    # Notify the Maker (Super Admin)
+    super_admin_email = req.get("requested_by")
+    notification_service.dispatch(
+        recipient_email=super_admin_email,
+        subject="❌ [AWSSecurity] Request Rejected",
+        body_text=f"Hello,\n\nYour recent administrative request has been REJECTED by the God Mode Administrator.\n\nRequest ID: {request_id}\nAction: {req.get('action_type')} on {req.get('target_identifier')}\n\nNo changes were made to the system.",
+        notification_type="SECURITY_NOTIFICATION",
+        is_serious=True
+    )
+
+    return {"status": "SUCCESS", "message": f"Request {request_id} rejected. Super Admin notified."}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    print("[AWSSecurity] Starting serverless web application on http://127.0.0.1:8000 ...")
+    uvicorn.run(app, host="127.0.0.1", port=8000)
+

@@ -612,27 +612,40 @@ const SUPER_ADMIN_CONFIG = {
   // Super Admin email list (case-insensitive)
   emails: [
     "superadmin@awssecurity.io",
+    "anushree2k5@gmail.com",
+    "adhiam@outlook.in",
     ...(JSON.parse(localStorage.getItem("super_admin_emails") || "[]"))
   ],
-  roles: ["SUPER_ADMIN"],
+  roles: ["SUPER_ADMIN", "ROOT_OWNER", "ROOT_ADMIN"],
   passwords: [] // Kept confidential under admin
 };
 window.SUPER_ADMIN_CONFIG = SUPER_ADMIN_CONFIG;
 
 function isSuperAdmin(user = AppState.user) {
   if (!user) return false;
-  // Check explicit super admin flag
-  if (user.is_super_admin === true) return true;
+  // Check explicit super admin flag or root admin flag
+  if (user.is_super_admin === true || user.is_root_admin === true || user.is_root_owner === true) return true;
   const userEmail = (user.email || "").toLowerCase().trim();
   if (userEmail && SUPER_ADMIN_CONFIG.emails.some(e => e.toLowerCase().trim() === userEmail)) {
     return true;
   }
-  if (user.role && SUPER_ADMIN_CONFIG.roles.includes(String(user.role).toUpperCase().trim())) {
+  const role = String(user.role || "").toUpperCase().trim();
+  if (role && SUPER_ADMIN_CONFIG.roles.includes(role)) {
     return true;
   }
   return false;
 }
 window.isSuperAdmin = isSuperAdmin;
+
+function isRootOwner(user = AppState.user) {
+  if (!user) return false;
+  if (user.is_root_owner === true) return true;
+  const role = String(user.role || "").toUpperCase().trim();
+  if (role === "ROOT_OWNER") return true;
+  const userEmail = (user.email || "").toLowerCase().trim();
+  return userEmail === "adhiam@outlook.in";
+}
+window.isRootOwner = isRootOwner;
 
 // Helper to easily register/change super admin email at runtime or from console:
 window.setSuperAdminEmail = function(email) {

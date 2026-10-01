@@ -57,4 +57,5 @@ test_results.txt
 docs_extracted.txt
 docs_full.txt
 .gitignore-antigravity
+check_roles.py
 

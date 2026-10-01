@@ -22,6 +22,16 @@ async function checkCurrentUser() {
     loadUserSessions(true);
     loadUserAlerts();
     
+    if (res.data.require_password_change) {
+      if (typeof openModal === "function") {
+        openModal("modal-reset-password");
+        if (typeof switchPasswordMode === "function") {
+          switchPasswordMode("auth");
+        }
+        showToast("⚠️ Security Notice: Mandatory password update required for your account.", "warning");
+      }
+    }
+    
     // Launch background worker, real-time SSE stream, and notification permissions
     startBackgroundTimerWorker();
     connectSecurityStream();
@@ -122,9 +132,14 @@ function renderUserPortal() {
     }
 
     const roleBadge = document.getElementById("user-role-badge");
-    const isSuper = (typeof isSuperAdmin === "function") ? isSuperAdmin(AppState.user) : (AppState.user.is_super_admin || AppState.user.role === "SUPER_ADMIN");
+    const isRoot = (typeof isRootOwner === "function") ? isRootOwner(AppState.user) : (AppState.user && (AppState.user.role === "ROOT_OWNER" || AppState.user.is_root_owner));
+    const isSuper = (typeof isSuperAdmin === "function") ? isSuperAdmin(AppState.user) : (AppState.user && (AppState.user.is_super_admin || AppState.user.role === "SUPER_ADMIN"));
     if (roleBadge) {
-      if (isSuper) {
+      if (isRoot) {
+        roleBadge.style.display = "inline-flex";
+        roleBadge.className = "capsule-badge capsule-amber font-mono";
+        roleBadge.innerHTML = '<span class="pulse-dot pulse-dot-amber"></span>👑 GOD MODE ADMIN';
+      } else if (isSuper) {
         roleBadge.style.display = "inline-flex";
         roleBadge.className = "capsule-badge capsule-amber font-mono";
         roleBadge.innerHTML = '<span class="pulse-dot pulse-dot-amber"></span>👑 SUPER ADMIN';

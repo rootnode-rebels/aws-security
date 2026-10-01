@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "1. Committing to GitHub..."
 git add .
-git commit -m "fix(security): strictly enforce MongoDB in prod and patch auth key error"
+git commit -m "fix(governance): add Maker-Checker dual control, safe PyMongo serialization, God Mode queue, and smooth theme transitions"
 git push origin main
 
 Write-Host "2. Building and Pushing to AWS ECR..."

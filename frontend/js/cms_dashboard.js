@@ -24,6 +24,7 @@ async function cmsLoadData() {
   await cmsFetchStats();
   await cmsFetchUsers();
   await cmsFetchSessions();
+  godmodeCheckVisibility();
 }
 window.cmsLoadData = cmsLoadData;
 
@@ -144,8 +145,14 @@ async function cmsUnlockUser(email) {
       throw new Error(response.data?.detail || 'Failed to unlock user');
     }
 
-    if (typeof showToast === 'function') {
-      showToast(`Account ${email} successfully unlocked and restored to ACTIVE!`, 'success');
+    if (response.data?.status === 'PENDING_APPROVAL') {
+      if (typeof showToast === 'function') {
+        showToast(`Request submitted. God Mode Admin must approve unlocking ${email}.`, 'warning');
+      }
+    } else {
+      if (typeof showToast === 'function') {
+        showToast(`Account ${email} successfully unlocked and restored to ACTIVE!`, 'success');
+      }
     }
 
     await cmsLoadData();
@@ -177,8 +184,15 @@ async function cmsDeleteUser(email) {
       throw new Error(response.data?.detail || 'Failed to delete user');
     }
     
-    if (typeof showToast === 'function') {
-      showToast(`User ${email} deleted successfully.`, 'success');
+    // Handle Dual-Control Maker-Checker response
+    if (response.data?.status === 'PENDING_APPROVAL') {
+      if (typeof showToast === 'function') {
+        showToast(`Request submitted. God Mode Admin must approve the deletion of ${email}.`, 'warning');
+      }
+    } else {
+      if (typeof showToast === 'function') {
+        showToast(`User ${email} deleted successfully.`, 'success');
+      }
     }
     
     // Refresh the table and stats
@@ -349,8 +363,14 @@ async function cmsTerminateSession(sessionId) {
       throw new Error(response.data?.detail || 'Failed to terminate session');
     }
 
-    if (typeof showToast === 'function') {
-      showToast(`Session ${sessionId} terminated successfully. Device signed out.`, 'success');
+    if (response.data?.status === 'PENDING_APPROVAL') {
+      if (typeof showToast === 'function') {
+        showToast(`Request submitted. God Mode Admin must approve terminating session ${sessionId}.`, 'warning');
+      }
+    } else {
+      if (typeof showToast === 'function') {
+        showToast(`Session ${sessionId} terminated successfully. Device signed out.`, 'success');
+      }
     }
 
     await cmsFetchStats();
@@ -455,4 +475,145 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+// =========================================================================
+// God Mode Approval Queue (Maker-Checker Dual-Control UI)
+// =========================================================================
 
+/**
+ * Show God Mode Approvals panel only for ROOT_OWNER users
+ */
+function godmodeCheckVisibility() {
+  const panel = document.getElementById('godmode-approvals-panel');
+  if (!panel) return;
+  const user = (typeof AppState !== 'undefined') ? AppState.user : null;
+  const isGod = (typeof isRootOwner === 'function') 
+    ? isRootOwner(user) 
+    : (user && (user.role === 'ROOT_OWNER' || user.is_root_owner === true || (user.email || '').toLowerCase().trim() === 'adhiam@outlook.in'));
+  if (isGod) {
+    panel.style.display = '';
+    godmodeLoadApprovals();
+  } else {
+    panel.style.display = 'none';
+  }
+}
+window.godmodeCheckVisibility = godmodeCheckVisibility;
+
+/**
+ * Fetch and render pending approval requests
+ */
+async function godmodeLoadApprovals() {
+  const container = document.getElementById('godmode-approvals-list');
+  const countBadge = document.getElementById('godmode-pending-count');
+  if (!container) return;
+
+  container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 1rem 0; font-size: 0.85rem;">Loading pending requests...</div>';
+
+  try {
+    const response = await apiFetch('/api/cms/approvals');
+    if (!response.ok) throw new Error(response.data?.detail || 'Failed to fetch approvals');
+
+    const requests = response.data?.data || [];
+    if (countBadge) countBadge.textContent = `${requests.length} Pending`;
+
+    if (requests.length === 0) {
+      container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 2rem 0; font-size: 0.85rem;">No pending approval requests. All clear.</div>';
+      return;
+    }
+
+    container.innerHTML = '';
+    requests.forEach(req => {
+      const card = document.createElement('div');
+      card.style.cssText = 'background: rgba(245, 158, 11, 0.05); border: 1px solid rgba(245, 158, 11, 0.15); border-radius: 8px; padding: 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;';
+
+      const actionLabel = (req.action_type || 'UNKNOWN').replace(/_/g, ' ');
+      const timeStr = req.created_at ? new Date(req.created_at).toLocaleString() : 'Unknown';
+
+      card.innerHTML = `
+        <div style="flex: 1; min-width: 200px;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem;">
+            <span class="badge badge-medium font-mono" style="font-size: 0.7rem; color: var(--accent-amber); border-color: rgba(245, 158, 11, 0.4);">${escapeHtml(actionLabel)}</span>
+            <span style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);">${escapeHtml(req._id || '')}</span>
+          </div>
+          <div style="font-size: 0.85rem; color: #fff;">
+            <strong>${escapeHtml(req.requested_by || 'Super Admin')}</strong> requested
+            <code class="font-mono text-cyan" style="font-size: 0.8rem;">${escapeHtml(actionLabel)}</code>
+            on <code class="font-mono" style="color: var(--accent-crimson); font-size: 0.8rem;">${escapeHtml(req.target_identifier || 'N/A')}</code>
+          </div>
+          <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.2rem;">Requested: ${escapeHtml(timeStr)}</div>
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+          <button class="btn btn-sm" style="background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); border: 1px solid rgba(16, 185, 129, 0.3);" onclick="godmodeApprove('${escapeHtml(req._id)}')" title="Approve and execute this request">
+            Approve
+          </button>
+          <button class="btn btn-danger btn-sm" onclick="godmodeReject('${escapeHtml(req._id)}')" title="Reject this request permanently">
+            Reject
+          </button>
+        </div>
+      `;
+      container.appendChild(card);
+    });
+  } catch (err) {
+    console.error('[GodMode] Error fetching approvals:', err);
+    container.innerHTML = `<div style="text-align: center; color: var(--accent-crimson); padding: 1rem 0; font-size: 0.85rem;">Error loading approvals: ${err.message}</div>`;
+  }
+}
+window.godmodeLoadApprovals = godmodeLoadApprovals;
+
+/**
+ * Approve a pending request (God Mode only)
+ */
+async function godmodeApprove(requestId) {
+  if (!confirm(`Are you sure you want to APPROVE and EXECUTE request ${requestId}? This action will be carried out immediately and cannot be undone.`)) {
+    return;
+  }
+
+  try {
+    const response = await apiFetch(`/api/cms/approvals/${encodeURIComponent(requestId)}/approve`, {
+      method: 'POST'
+    });
+
+    if (!response.ok) throw new Error(response.data?.detail || 'Failed to approve request');
+
+    if (typeof showToast === 'function') {
+      showToast(`Request ${requestId} approved and executed. Super Admin has been notified via email.`, 'success');
+    }
+
+    await godmodeLoadApprovals();
+    await cmsLoadData();
+  } catch (err) {
+    if (typeof showToast === 'function') {
+      showToast(`Error approving request: ${err.message}`, 'error');
+    }
+    console.error('[GodMode] Error approving request:', err);
+  }
+}
+window.godmodeApprove = godmodeApprove;
+
+/**
+ * Reject a pending request (God Mode only)
+ */
+async function godmodeReject(requestId) {
+  if (!confirm(`Are you sure you want to REJECT request ${requestId}? The Super Admin will be notified and no changes will be made.`)) {
+    return;
+  }
+
+  try {
+    const response = await apiFetch(`/api/cms/approvals/${encodeURIComponent(requestId)}/reject`, {
+      method: 'POST'
+    });
+
+    if (!response.ok) throw new Error(response.data?.detail || 'Failed to reject request');
+
+    if (typeof showToast === 'function') {
+      showToast(`Request ${requestId} rejected. Super Admin has been notified.`, 'warning');
+    }
+
+    await godmodeLoadApprovals();
+  } catch (err) {
+    if (typeof showToast === 'function') {
+      showToast(`Error rejecting request: ${err.message}`, 'error');
+    }
+    console.error('[GodMode] Error rejecting request:', err);
+  }
+}
+window.godmodeReject = godmodeReject;

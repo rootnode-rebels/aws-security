@@ -214,7 +214,8 @@ class LocalDatabase:
             "active_sessions": [],
             "security_events": [],
             "password_resets": [],
-            "cloudwatch_logs": []
+            "cloudwatch_logs": [],
+            "admin_requests": []
         }
         self._load()
 
@@ -304,6 +305,22 @@ def _sanitize_mongo_value(val: Any) -> Any:
     return val
 
 
+def _normalize_filter(filter_query):
+    if not isinstance(filter_query, dict):
+        return filter_query if filter_query is not None else {}
+    query_copy = dict(filter_query)
+    if "_id" in query_copy:
+        val = query_copy["_id"]
+        if isinstance(val, str) and len(val) == 24:
+            try:
+                from bson import ObjectId
+                if ObjectId.is_valid(val):
+                    query_copy["_id"] = {"$in": [val, ObjectId(val)]}
+            except Exception:
+                pass
+    return query_copy
+
+
 class MongoCollectionWrapper:
     """Wrapper around raw PyMongo collection to support sort_key, reverse, limit, and serializable dicts."""
     def __init__(self, raw_collection):
@@ -311,7 +328,7 @@ class MongoCollectionWrapper:
 
     def find_one(self, query=None, *args, **kwargs):
         try:
-            filter_query = query if query is not None else {}
+            filter_query = _normalize_filter(query)
             doc = self._col.find_one(filter_query, *args, **kwargs)
             if doc is not None:
                 return _sanitize_mongo_value(dict(doc))
@@ -326,7 +343,7 @@ class MongoCollectionWrapper:
         limit = kwargs.pop("limit", None)
 
         try:
-            filter_query = query if query is not None else {}
+            filter_query = _normalize_filter(query)
             cursor = self._col.find(filter_query, *args, **kwargs)
             if sort_key:
                 direction = -1 if reverse else 1
@@ -345,7 +362,7 @@ class MongoCollectionWrapper:
 
     def count_documents(self, query=None, *args, **kwargs) -> int:
         try:
-            filter_query = query if query is not None else {}
+            filter_query = _normalize_filter(query)
             return self._col.count_documents(filter_query, *args, **kwargs)
         except Exception as e:
             print(f"[DB] Mongo count_documents error: {e}")
@@ -353,7 +370,7 @@ class MongoCollectionWrapper:
 
     def delete_many(self, query=None, *args, **kwargs) -> int:
         try:
-            filter_query = query if query is not None else {}
+            filter_query = _normalize_filter(query)
             res = self._col.delete_many(filter_query, *args, **kwargs)
             return int(getattr(res, "deleted_count", 0))
         except Exception as e:
@@ -362,7 +379,7 @@ class MongoCollectionWrapper:
 
     def delete_one(self, query=None, *args, **kwargs) -> bool:
         try:
-            filter_query = query if query is not None else {}
+            filter_query = _normalize_filter(query)
             res = self._col.delete_one(filter_query, *args, **kwargs)
             return bool(getattr(res, "deleted_count", 0) > 0)
         except Exception as e:
@@ -371,7 +388,7 @@ class MongoCollectionWrapper:
 
     def update_many(self, query=None, update=None, *args, **kwargs) -> int:
         try:
-            filter_query = query if query is not None else {}
+            filter_query = _normalize_filter(query)
             update_spec = update if update is not None else {}
             res = self._col.update_many(filter_query, update_spec, *args, **kwargs)
             return int(getattr(res, "modified_count", 0))
@@ -381,7 +398,7 @@ class MongoCollectionWrapper:
 
     def update_one(self, query=None, update=None, *args, **kwargs) -> bool:
         try:
-            filter_query = query if query is not None else {}
+            filter_query = _normalize_filter(query)
             update_spec = update if update is not None else {}
             res = self._col.update_one(filter_query, update_spec, *args, **kwargs)
             return bool(getattr(res, "modified_count", 0) > 0 or getattr(res, "matched_count", 0) > 0)
@@ -479,5 +496,9 @@ class DatabaseManager:
     @property
     def security_alerts(self):
         return self.get_collection("security_alerts")
+
+    @property
+    def admin_requests(self):
+        return self.get_collection("admin_requests")
 
 db = DatabaseManager()
