@@ -612,6 +612,7 @@ const SUPER_ADMIN_CONFIG = {
   // Super Admin email list (case-insensitive)
   emails: [
     "superadmin@awssecurity.io",
+    "likhithadm@gmail.com",
     ...(JSON.parse(localStorage.getItem("super_admin_emails") || "[]"))
   ],
   roles: ["SUPER_ADMIN"],

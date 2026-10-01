@@ -5,8 +5,25 @@ Supports MongoDB (via PyMongo) with transparent local document-store fallback fo
 import os
 import json
 import threading
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, date, timezone, timedelta
 from typing import Dict, Any, List, Optional
+
+def _load_env():
+    env_file = os.path.join(os.path.dirname(__file__), "..", ".env")
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k, v = k.strip(), v.strip().strip('"').strip("'")
+                        if k and k not in os.environ:
+                            os.environ[k] = v
+        except Exception:
+            pass
+
+_load_env()
 
 DB_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "db.json")
 MONGODB_URI = os.getenv("MONGODB_URI", "")
@@ -17,21 +34,31 @@ class LocalCollection:
         self.name = name
         self.parent = parent_db
 
-    def find_one(self, query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        docs = self.parent.get_collection_data(self.name)
+    def find_one(self, query: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        with self.parent.lock:
+            docs = list(self.parent.get_collection_data(self.name))
+        filter_query = query if query is not None else {}
         for doc in docs:
-            if self._matches(doc, query):
+            if self._matches(doc, filter_query):
                 return json.loads(json.dumps(doc))
         return None
 
     def find(self, query: Optional[Dict[str, Any]] = None, sort_key: Optional[str] = None, reverse: bool = False, limit: int = 100) -> List[Dict[str, Any]]:
-        docs = self.parent.get_collection_data(self.name)
+        with self.parent.lock:
+            docs = list(self.parent.get_collection_data(self.name))
         results = []
         for doc in docs:
             if query is None or self._matches(doc, query):
                 results.append(json.loads(json.dumps(doc)))
         if sort_key:
-            results.sort(key=lambda x: x.get(sort_key, ""), reverse=reverse)
+            def _safe_sort(x):
+                val = x.get(sort_key)
+                if val is None:
+                    return ""
+                if isinstance(val, (int, float)):
+                    return f"{val:020.6f}"
+                return str(val)
+            results.sort(key=_safe_sort, reverse=reverse)
         return results[:limit]
 
     def insert_one(self, doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -136,7 +163,8 @@ class LocalCollection:
             return deleted_count
 
     def count_documents(self, query: Optional[Dict[str, Any]] = None) -> int:
-        docs = self.parent.get_collection_data(self.name)
+        with self.parent.lock:
+            docs = list(self.parent.get_collection_data(self.name))
         if not query:
             return len(docs)
         return sum(1 for doc in docs if self._matches(doc, query))
@@ -193,19 +221,31 @@ class LocalDatabase:
     def _prune_ttl_records(self):
         """Prunes stale telemetry to prevent unbounded growth in db.json (ISSUE-14)."""
         now = datetime.now(timezone.utc)
+        cutoff_7d = (now - timedelta(days=7)).isoformat()
+        cutoff_30d = (now - timedelta(days=30)).isoformat()
+
+        def _safe_ts(rec):
+            if not isinstance(rec, dict):
+                return ""
+            ts = rec.get("timestamp") or rec.get("created_at") or ""
+            if isinstance(ts, (int, float)):
+                try:
+                    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+                except Exception:
+                    return ""
+            return str(ts)
+
         cw_logs = self.data.get("cloudwatch_logs", [])
         if cw_logs:
-            cutoff_7d = (now - timedelta(days=7)).isoformat()
             self.data["cloudwatch_logs"] = [
                 log for log in cw_logs
-                if log.get("timestamp", log.get("created_at", "")) >= cutoff_7d
+                if _safe_ts(log) >= cutoff_7d
             ]
         sec_events = self.data.get("security_events", [])
         if sec_events:
-            cutoff_30d = (now - timedelta(days=30)).isoformat()
             self.data["security_events"] = [
                 ev for ev in sec_events
-                if ev.get("timestamp", ev.get("created_at", "")) >= cutoff_30d
+                if _safe_ts(ev) >= cutoff_30d
             ]
 
     def _load(self):
@@ -248,24 +288,120 @@ class LocalDatabase:
         return LocalCollection(name, self)
 
 
+def _sanitize_mongo_value(val: Any) -> Any:
+    """Recursively converts BSON ObjectId, datetime, and nested structures to JSON-serializable types."""
+    if val is None:
+        return None
+    type_name = type(val).__name__
+    if "ObjectId" in type_name or type_name in ("Decimal128", "Binary", "DBRef"):
+        return str(val)
+    if isinstance(val, (datetime, date)):
+        return val.isoformat()
+    if isinstance(val, dict):
+        return {str(k): _sanitize_mongo_value(v) for k, v in val.items()}
+    if isinstance(val, (list, tuple, set)):
+        return [_sanitize_mongo_value(v) for v in val]
+    return val
+
+
 class MongoCollectionWrapper:
-    """Wrapper around raw PyMongo collection to support sort_key, reverse, and limit kwargs."""
+    """Wrapper around raw PyMongo collection to support sort_key, reverse, limit, and serializable dicts."""
     def __init__(self, raw_collection):
         self._col = raw_collection
+
+    def find_one(self, query=None, *args, **kwargs):
+        try:
+            filter_query = query if query is not None else {}
+            doc = self._col.find_one(filter_query, *args, **kwargs)
+            if doc is not None:
+                return _sanitize_mongo_value(dict(doc))
+            return None
+        except Exception as e:
+            print(f"[DB] Mongo find_one error: {e}")
+            return None
 
     def find(self, query=None, *args, **kwargs):
         sort_key = kwargs.pop("sort_key", None)
         reverse = kwargs.pop("reverse", False)
         limit = kwargs.pop("limit", None)
 
-        filter_query = query if query is not None else {}
-        cursor = self._col.find(filter_query, *args, **kwargs)
-        if sort_key:
-            direction = -1 if reverse else 1
-            cursor = cursor.sort([(sort_key, direction)])
-        if limit:
-            cursor = cursor.limit(limit)
-        return cursor
+        try:
+            filter_query = query if query is not None else {}
+            cursor = self._col.find(filter_query, *args, **kwargs)
+            if sort_key:
+                direction = -1 if reverse else 1
+                cursor = cursor.sort([(sort_key, direction)])
+            if limit:
+                cursor = cursor.limit(limit)
+            
+            results = []
+            for doc in cursor:
+                if isinstance(doc, dict):
+                    results.append(_sanitize_mongo_value(dict(doc)))
+            return results
+        except Exception as e:
+            print(f"[DB] Mongo find error: {e}")
+            return []
+
+    def count_documents(self, query=None, *args, **kwargs) -> int:
+        try:
+            filter_query = query if query is not None else {}
+            return self._col.count_documents(filter_query, *args, **kwargs)
+        except Exception as e:
+            print(f"[DB] Mongo count_documents error: {e}")
+            return 0
+
+    def delete_many(self, query=None, *args, **kwargs) -> int:
+        try:
+            filter_query = query if query is not None else {}
+            res = self._col.delete_many(filter_query, *args, **kwargs)
+            return int(getattr(res, "deleted_count", 0))
+        except Exception as e:
+            print(f"[DB] Mongo delete_many error: {e}")
+            return 0
+
+    def delete_one(self, query=None, *args, **kwargs) -> bool:
+        try:
+            filter_query = query if query is not None else {}
+            res = self._col.delete_one(filter_query, *args, **kwargs)
+            return bool(getattr(res, "deleted_count", 0) > 0)
+        except Exception as e:
+            print(f"[DB] Mongo delete_one error: {e}")
+            return False
+
+    def update_many(self, query=None, update=None, *args, **kwargs) -> int:
+        try:
+            filter_query = query if query is not None else {}
+            update_spec = update if update is not None else {}
+            res = self._col.update_many(filter_query, update_spec, *args, **kwargs)
+            return int(getattr(res, "modified_count", 0))
+        except Exception as e:
+            print(f"[DB] Mongo update_many error: {e}")
+            return 0
+
+    def update_one(self, query=None, update=None, *args, **kwargs) -> bool:
+        try:
+            filter_query = query if query is not None else {}
+            update_spec = update if update is not None else {}
+            res = self._col.update_one(filter_query, update_spec, *args, **kwargs)
+            return bool(getattr(res, "modified_count", 0) > 0 or getattr(res, "matched_count", 0) > 0)
+        except Exception as e:
+            print(f"[DB] Mongo update_one error: {e}")
+            return False
+
+    def insert_one(self, doc, *args, **kwargs):
+        try:
+            return self._col.insert_one(doc, *args, **kwargs)
+        except Exception as e:
+            print(f"[DB] Mongo insert_one error: {e}")
+            return None
+
+    def insert_many(self, docs, *args, **kwargs):
+        try:
+            return self._col.insert_many(docs, *args, **kwargs)
+        except Exception as e:
+            print(f"[DB] Mongo insert_many error: {e}")
+            return None
 
     def __getattr__(self, name):
         return getattr(self._col, name)
