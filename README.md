@@ -15,7 +15,7 @@
 
 ---
 
-[Tech Stack](#-complete-technology-stack) • [AWS Deep Dive & How It Works](#-deep-dive-how-aws-services-work) • [ML Engine](#-7-dimensional-behavioral-ml-pipeline) • [Adaptive Security](#-adaptive-security-policy--notification-routing) • [Zero-Trust Hardening](#-security-hardening--audit-verification) • [Super Admin CMS](#-super-admin-governance--session-control) • [Quickstart](#-quick-start-guide) • [Live Demo](#-live-two-browser-demonstration) • [Tests](#-automated-testing--audit-verification)
+[Tech Stack](#complete-technology-stack) • [AWS Deep Dive & How It Works](#deep-dive-how-aws-services-work) • [ML Engine](#7-dimensional-behavioral-ml-pipeline) • [Adaptive Security](#adaptive-security-policy--notification-routing) • [Zero-Trust Hardening](#security-hardening--audit-verification) • [Super Admin CMS](#super-admin-governance--session-control) • [Quickstart](#quick-start-guide) • [Live Demo](#live-two-browser-demonstration) • [Tests](#automated-testing--audit-verification)
 
 ---
 
@@ -49,6 +49,8 @@
 
 ---
 
+<a id="complete-technology-stack"></a>
+<a id="-complete-technology-stack"></a>
 ## 🧰 Complete Technology Stack
 
 | Layer | Technologies & Libraries | Purpose & Function |
@@ -66,95 +68,155 @@
 
 ---
 
+<a id="deep-dive-how-aws-services-work"></a>
+<a id="-deep-dive-how-aws-services-work"></a>
 ## ☁️ Deep Dive: How AWS Services Work
 
-This platform is engineered to run both natively on **AWS Serverless infrastructure** (via `aws/template.yaml`) and locally using zero-dependency emulation microservices.
+This platform is engineered with a **Dual-Architecture Cloud Strategy**:
+1. **Primary Production Environment (Live)**: Deployed on **AWS App Runner** in the Frankfurt region (`eu-central-1`) with private container images sourced from **AWS Elastic Container Registry (ECR)**, real-time SIEM aggregation in **Amazon CloudWatch**, cross-region threat alerts over **Amazon SNS**, and global document persistence via **MongoDB Atlas Cloud**.
+2. **Serverless Microservices Alternative**: Exportable and deployable via **AWS Serverless Application Model (SAM)** (`aws/template.yaml`) using **Amazon API Gateway** and dedicated **AWS Lambda** microservices.
 
 ```mermaid
 flowchart TD
-    subgraph CLIENT["1. Client Telemetry Ingress"]
+    subgraph CLIENT["1. Client Telemetry & Ingress"]
         C1["User Workstation / Mobile Browser"]
-        C2["Red Team Attack Simulator"]
+        C2["Red Team Cyber Attack Studio"]
+        C3["Primary Device Master Session"]
     end
 
-    subgraph APIGW["2. Amazon API Gateway"]
-        AG1["REST API Gateway (Stage: /prod)"]
-        AG2["CORS & Request Header Validation"]
-        AG3["Client IP Extraction (CF-Connecting-IP / XFF)"]
+    subgraph DEPLOY["2. Deployment & Container Pipeline"]
+        ECR["AWS Elastic Container Registry (ECR)<br/><code>242254325378.dkr.ecr.eu-central-1.amazonaws.com</code>"]
+        DOCKER["Multi-Stage Production Docker Build<br/>(Python 3.11-Slim Runtime)"]
+        DOCKER -->|Pushed via AWS IAM Token| ECR
     end
 
-    subgraph LAMBDA["3. AWS Lambda Serverless Microservices"]
-        L1["AuthHandler Lambda<br/>(PBKDF2-SHA256, Anti-Timing Dummy, Session Tokens)"]
-        L2["AccountHijackRiskEngine Lambda<br/>(7D Feature Extractor, Random Forest, Autoencoder)"]
-        L3["AlertDispatcher Lambda<br/>(Deduplication Filter, Cooldown Enforcer, SNS Publisher)"]
-        L4["CMSGovernanceEngine Lambda<br/>(Single-Device Session Enforcement, Maintenance Mode)"]
+    subgraph APPRUNNER["3. AWS App Runner (Production Compute & Edge Ingress)"]
+        AR_TLS["Auto-Managed TLS / SSL Termination<br/>(HTTPS: wviuki4xep.eu-central-1.awsapprunner.com)"]
+        AR_HC["Automated Health Checks<br/>(GET /api/system/status every 30s)"]
+        AR_SCALE["Dynamic Auto-Scaler & Concurrency Balancer"]
+        AR_APP["FastAPI ASGI High-Concurrency Engine<br/>(Sub-5ms Execution Latency)"]
+        AR_TLS --> AR_APP
+        AR_HC --> AR_APP
+        AR_SCALE --> AR_APP
     end
 
-    subgraph CW["4. Amazon CloudWatch Telemetry & SIEM"]
-        CW1["Log Groups (/aws/lambda/AuthHandler, /RiskEngine)"]
-        CW2["Custom CloudWatch Metrics (BlockedHijacks, StepUpMFA)"]
-        CW3["CloudWatch Alarm (HighRiskRateAlarm)"]
+    subgraph ML_ENGINE["4. Continuous Behavioral ML Engine"]
+        F_EXT["7-Dimensional Feature Extractor<br/>(Haversine Velocity, Canvas Diff, Risk Drift)"]
+        RF["Random Forest Classifier"]
+        IF["Isolation Forest Anomaly Detector"]
+        TF["TensorFlow Deep Neural Autoencoder<br/>(7-4-2-4-7 MSE Reconstruction Error)"]
+        XAI["Explainable AI (XAI) Attribution Engine"]
+        F_EXT --> RF & IF & TF
+        RF & IF & TF --> XAI
     end
 
-    subgraph NOTIF["5. Amazon SNS & SES Out-of-Band Routing"]
-        SNS1["SNS Topic (AccountHijackSecurityAlerts)"]
-        SES1["Amazon SES / SMTP Email Gateway"]
-        SSE1["Server-Sent Events (SSE) Live Push Stream"]
+    subgraph CW["5. Amazon CloudWatch Telemetry & SIEM"]
+        CW_LOGS["CloudWatch Log Groups<br/><code>/aws/apprunner/aws-security-app-service</code><br/><code>/aws/lambda/AuthHandler</code>"]
+        CW_METRICS["Custom SIEM Metric Filters<br/>(BlockedHijacks, StepUpMFA, AllowSessions)"]
+        CW_ALARM["CloudWatch HighRiskRateAlarm<br/>(Fires when BlockedHijacks > 5 / min)"]
+        CW_METRICS --> CW_ALARM
     end
 
-    subgraph DATA["6. Document Store & State"]
-        DB1["Amazon DocumentDB / MongoDB Cluster"]
-        DB2["Local Atomic JSON Store (data/db.json)"]
+    subgraph NOTIF["6. Amazon SNS & Multi-Channel Alert Fanout"]
+        SNS["Amazon SNS Topic (eu-central-1)<br/><code>AccountHijackSecurityAlerts</code>"]
+        SNS_EMAIL["Amazon SES & Out-of-Band Email Gateway"]
+        SNS_SMS["High-Priority SMS Alert Dispatch"]
+        SSE["Server-Sent Events (SSE) 0ms Push Stream"]
+        TOAST["Windows OS Native Desktop Toast Notifications"]
     end
 
-    CLIENT -->|HTTPS / REST| APIGW
-    APIGW -->|JSON Event Payload| LAMBDA
-    L1 <--> L2
-    L2 -->|Risk Score >= 70| L3
-    LAMBDA --> CW
-    L3 --> SNS1
-    L3 --> SES1
-    L3 --> SSE1
-    LAMBDA <--> DATA
-    CW2 --> CW3
+    subgraph DATA["7. Persistent Document Store & State"]
+        MONGO["MongoDB Atlas Cloud Cluster (account_security_db)<br/>Users, Active Sessions, Security Events, Approvals"]
+        GOV["Maker-Checker Dual Control Governance Engine<br/>(Requires God Mode ROOT_OWNER Authorization)"]
+        MONGO <--> GOV
+    end
+
+    ECR -->|Auto-Pulls Latest Image Digest| APPRUNNER
+    CLIENT -->|HTTPS / REST / WebSocket| AR_TLS
+    AR_APP <--> ML_ENGINE
+    AR_APP <--> DATA
+    AR_APP -->|Structured JSON Audit Logs & Metrics| CW_LOGS & CW_METRICS
+    AR_APP -->|Critical Threat Score >= 70| SNS
+    CW_ALARM -->|Trigger Incident Response| SNS
+    SNS --> SNS_EMAIL & SNS_SMS
+    AR_APP -->|Live Alert Push| SSE & TOAST
 ```
-
-### 1. Amazon API Gateway (Ingress & Protocol Mediation)
-- **Edge Security & Routing:** Serves as the front door for incoming traffic. Handles TLS termination, enforces Cross-Origin Resource Sharing (CORS) whitelists, and manages REST routes (`/api/auth/*`, `/api/security/*`, `/api/cms/*`).
-- **IP & Header Preservation:** Forwards client proxy headers (`CF-Connecting-IP`, `X-Forwarded-For`, and `User-Agent`) to downstream Lambda functions, enabling accurate GeoIP resolution even through reverse proxies and CDN edges.
-
-### 2. AWS Lambda (Serverless Microservices Compute)
-The application architecture is decomposed into distinct, stateless serverless functions:
-- **`AuthHandler` (Authentication & Session Authority):**
-  - Executes PBKDF2-HMAC-SHA256 verification (200,000 iterations).
-  - Implements **timing-attack immunity**: If an unregistered account or locked user signs in, the Lambda executes a full dummy PBKDF2 cycle with constant-time comparison to prevent side-channel username enumeration.
-  - Enforces finite 30-day session lifespans and issues cryptographically signed session tokens.
-- **`AccountHijackRiskEngine` (Behavioral Intelligence):**
-  - Computes the 7-dimensional behavioral feature vector in real time.
-  - Queries user baseline profiles and evaluates anomaly scores across the **Scikit-Learn Random Forest**, **Isolation Forest**, and **TensorFlow Deep Neural Autoencoder**.
-  - Generates itemized Explainable AI (XAI) factor weights.
-- **`AlertDispatcher` (Intelligent Alert Routing):**
-  - Applies a sliding-window deduplication cooldown (default: 300s) to prevent alert flooding.
-  - Routes critical hijacking alerts ($> 70\text{ pts}$) to Amazon SNS, triggers Windows Desktop toast notifications, and emits live Server-Sent Events (SSE) to connected primary devices.
-- **`CMSGovernanceEngine` (Platform Administration):**
-  - Manages single-device session enforcement for the Super Admin role.
-  - Provides emergency maintenance mode toggles and remote session revocation capabilities.
-
-### 3. Amazon CloudWatch (SIEM Metrics & Alarms)
-- **Structured Audit Logging:** Every login evaluation, session termination, and policy decision is recorded in dedicated log groups (`/aws/lambda/AuthHandler` and `/aws/lambda/AccountHijackRiskEngine`).
-- **Custom Metric Counters:**
-  - `BlockedHijacks`: Incremented on critical threat blocks (e.g. Impossible Travel $> 900\text{ km/h}$).
-  - `StepUpMFA`: Incremented on medium-risk step-up challenges.
-  - `AllowSessions`: Tracks normal, baseline sign-in volume.
-  - `InvocationLatency`: Tracks millisecond execution latencies across all API paths.
-- **CloudWatch Alarms (`HighRiskRateAlarm`):** Evaluates anomaly spikes within a 1-minute window. If `BlockedHijacks > 5`, the alarm enters the `ALARM` state and automatically triggers incident response workflows via Amazon SNS.
-
-### 4. Amazon SNS & SES (Out-of-Band Notification Routing)
-- **Amazon SNS Topic (`AccountHijackSecurityAlerts`):** Pub/sub messaging channel distributing high-priority threat alerts to registered administrative endpoints, Webhook listeners, and user mobile devices.
-- **Amazon SES / SMTP Integration:** Dispatches professional, out-of-band email alerts for Critical Risk events, step-up MFA codes, and password rotation confirmations.
 
 ---
 
+### 1. AWS App Runner (Production Compute & Edge Ingress)
+* **Production Service URL**: [`https://wviuki4xep.eu-central-1.awsapprunner.com/`](https://wviuki4xep.eu-central-1.awsapprunner.com/)
+* **Service ARN**: `arn:aws:apprunner:eu-central-1:242254325378:service/aws-security-app-service/e2c75827b7fe48a0963c9b0dc69ccc5e`
+* **Region**: `eu-central-1` (Frankfurt)
+* **How It Works**:
+  - **Zero-Infrastructure Management**: AWS App Runner provides a fully managed container service that handles deployment, provisioning, load balancing, and auto-scaling without requiring virtual machine orchestration or Kubernetes overhead.
+  - **Edge TLS & Certificate Lifecycle**: Automatically provisions, renews, and terminates TLS certificates at the AWS edge, enforcing HTTPS and modern cipher suites.
+  - **Automated Healthchecks**: Performs continuous health probes against `/api/system/status` every 30 seconds (healthy threshold: 1, timeout: 5s). Unhealthy containers are automatically replaced without dropping active client connections.
+  - **Zero-Downtime Rolling Updates**: Whenever a new image is pushed to AWS ECR, triggering `aws apprunner start-deployment` initiates a zero-downtime rolling update, draining in-flight requests gracefully before switching traffic to the new revision.
+
+### 2. AWS Elastic Container Registry (ECR — Private Container Pipeline)
+* **Registry URI**: `242254325378.dkr.ecr.eu-central-1.amazonaws.com/aws-security-app:latest`
+* **How It Works**:
+  - **Multi-Stage Hardened Image**: The Dockerfile builds in two distinct stages. The `builder` stage compiles all Python C-extensions (NumPy, Scikit-Learn, TensorFlow, PyMongo); the final `runtime` stage copies only the compiled wheels into a stripped-down `python:3.11-slim` base image.
+  - **IAM Token Authentication**: Deployments authenticate securely via short-lived AWS IAM authorization tokens generated with `aws ecr get-login-password --region eu-central-1`.
+  - **Immutable Image Tagging & Scanning**: ECR stores SHA-256 digests for every pushed revision, ensuring cryptographic image integrity before App Runner pulls and executes the workload.
+
+### 3. Amazon CloudWatch (SIEM Telemetry, Metric Counters & Alarms)
+* **Log Groups**:
+  - `/aws/apprunner/aws-security-app-service` (Production App Runner container execution logs)
+  - `/aws/lambda/AuthHandler` (Authentication and session authority audit trail)
+  - `/aws/lambda/AccountHijackRiskEngine` (ML scoring, factor weights, and anomaly inference logs)
+* **Custom Metric Counters**:
+  - `BlockedHijacks`: Incremented on critical threat blocks (e.g. Impossible Travel $> 900\text{ km/h}$ or Autoencoder MSE $> 0.08$).
+  - `StepUpMFA`: Incremented whenever secondary or unverified hardware prompts a step-up challenge.
+  - `AllowSessions`: Tracks normal baseline authentication traffic for volumetric analysis.
+  - `InvocationLatency`: Tracks millisecond execution latencies across all API paths.
+* **Metric Alarms (`HighRiskRateAlarm`)**:
+  - Evaluates anomalous blocks across a 60-second sliding evaluation period.
+  - If `BlockedHijacks > 5` within 1 minute, the alarm transitions to `ALARM` state and automatically invokes incident notification workflows via Amazon SNS.
+
+### 4. Amazon SNS & SES (Cross-Region Out-of-Band Incident Dispatch)
+* **SNS Topic**: `AccountHijackSecurityAlerts` (`arn:aws:sns:eu-central-1:242254325378:AccountHijackSecurityAlerts`)
+* **How It Works**:
+  - **Cross-Region ARN Resolution**: Implements dynamic ARN parsing in `notification_service.py` to seamlessly route messages between `us-east-1` and `eu-central-1` without SDK region mismatches.
+  - **Dual-Delivery Fanout**: High-risk threat alerts ($> 70\text{ pts}$) and step-up MFA codes are dispatched out-of-band via Amazon SNS (Email/SMS) while simultaneously streaming to the user's primary device screen via 0ms Server-Sent Events (SSE).
+  - **Deduplication Cooldown**: Employs an in-memory sliding-window cooldown filter (300 seconds) to prevent alert flooding during automated brute-force attacks.
+
+### 5. MongoDB Atlas Cloud Database (Persistent Security Store)
+* **Database Name**: `account_security_db`
+* **How It Works**:
+  - **Global Document Persistence**: Provides high-availability replica set storage for `users`, `active_sessions`, `security_events`, `security_alerts`, and `admin_requests`.
+  - **BSON ObjectId Sanitization**: Handled transparently by `_clean_mongo_doc` and `_sanitize_mongo_value` in `database/db_manager.py`, ensuring all BSON ObjectIds, datetimes, and Decimals serialize cleanly into standard JSON for frontend and FastAPI consumers.
+  - **Dual-Control Governance Queue**: Stores pending destructive administrative actions (account deletions, unlocks, session terminations) for Maker-Checker authorization by the God Mode Administrator (`ROOT_OWNER`).
+
+### 6. AWS SAM & Lambda Serverless Alternative (`aws/template.yaml`)
+For organizations requiring a pure serverless microservices deployment, the platform includes a complete **AWS SAM** template (`aws/template.yaml`):
+* **Amazon API Gateway (`AccountSecurityApi`)**:
+  - Stage: `/prod` with CORS header handling (`X-Client-Fingerprint`, `X-Request-Id`).
+  - Forwards client proxy headers (`CF-Connecting-IP`, `X-Forwarded-For`) to downstream functions for accurate GeoIP resolution.
+* **Decoupled Serverless Lambdas**:
+  - **`AuthHandler`**: Handles user registration, PBKDF2-HMAC-SHA256 (200k iterations), timing-attack immunity, and 30-day session token issuance.
+  - **`AccountHijackRiskEngine`**: Extracts the 7D feature vector and evaluates Random Forest, Isolation Forest, and Deep Neural Autoencoder anomaly scores.
+  - **`AlertDispatcher`**: Manages deduplication and dispatches SNS security alerts.
+  - **`CMSGovernanceEngine`**: Enforces single-device sessions and Maker-Checker approvals.
+
+---
+
+### AWS Service Architecture Matrix
+
+| AWS Service | Production Identifier / ARN | Purpose in Platform | Live Status |
+| :--- | :--- | :--- | :---: |
+| **AWS App Runner** | `arn:aws:apprunner:eu-central-1:242254325378:service/aws-security-app-service/...` | Primary container compute, TLS edge, and auto-scaling | **Active (Live)** |
+| **AWS ECR** | `242254325378.dkr.ecr.eu-central-1.amazonaws.com/aws-security-app:latest` | Secure private Docker container image registry | **Active (Live)** |
+| **Amazon CloudWatch** | `/aws/apprunner/aws-security-app-service` & custom SIEM metrics | Structured JSON logs, latency metrics, and threat alarms | **Active (Live)** |
+| **Amazon SNS** | `arn:aws:sns:eu-central-1:242254325378:AccountHijackSecurityAlerts` | Multi-channel SMS and email threat dispatch | **Active (Live)** |
+| **AWS SAM & Lambda** | Defined in `aws/template.yaml` (`AccountSecurityApi`, Lambdas) | Modular serverless microservices export configuration | **Configured** |
+| **Amazon SES** | Configured via SMTP / SES endpoint | Out-of-band email notifications and OTP verification | **Active** |
+
+---
+
+<a id="end-to-end-authentication--threat-interception-flow"></a>
+<a id="-end-to-end-authentication--threat-interception-flow"></a>
 ## 🔄 End-to-End Authentication & Threat Interception Flow
 
 ```mermaid
@@ -200,6 +262,8 @@ sequenceDiagram
 
 ---
 
+<a id="7-dimensional-behavioral-ml-pipeline"></a>
+<a id="-7-dimensional-behavioral-ml-pipeline"></a>
 ## 🧠 7-Dimensional Behavioral ML Pipeline
 
 On every authentication attempt, incoming telemetry is transformed into a normalized 7-dimensional behavioral vector:
@@ -226,6 +290,8 @@ $$\mathbf{x} = \begin{bmatrix} v_{\text{geo}}, & d_{\text{geo}}, & \Delta_{\text
 
 ---
 
+<a id="adaptive-security-policy--notification-routing"></a>
+<a id="-adaptive-security-policy--notification-routing"></a>
 ## ⚡ Adaptive Security Policy & Notification Routing
 
 ```
@@ -251,6 +317,8 @@ $$\mathbf{x} = \begin{bmatrix} v_{\text{geo}}, & d_{\text{geo}}, & \Delta_{\text
 
 ---
 
+<a id="security-hardening--audit-verification"></a>
+<a id="-security-hardening--audit-verification"></a>
 ## 🔒 Security Hardening & Audit Verification
 
 A comprehensive security audit across both backend and frontend confirmed 100% remediation of common web and API vulnerabilities:
@@ -268,6 +336,8 @@ A comprehensive security audit across both backend and frontend confirmed 100% r
 
 ---
 
+<a id="super-admin-governance--session-control"></a>
+<a id="-super-admin-governance--session-control"></a>
 ## 👑 Super Admin Governance & Session Control
 
 The platform provides dedicated enterprise administration via the `/api/cms/*` control plane:
@@ -288,6 +358,8 @@ The platform provides dedicated enterprise administration via the `/api/cms/*` c
 
 ---
 
+<a id="quick-start-guide"></a>
+<a id="-quick-start-guide"></a>
 ## 🚀 Quick Start Guide
 
 Run locally with zero external dependencies—includes built-in document storage, ML inference models, and CloudWatch telemetry emulation.
@@ -351,6 +423,8 @@ Cloudflare generates a secure temporary URL (e.g. `https://<subdomain>.trycloudf
 
 ---
 
+<a id="live-two-browser-demonstration"></a>
+<a id="-live-two-browser-demonstration"></a>
 ## 🎯 Live Two-Browser Demonstration
 
 Test real-time impossible travel detection and automated account defense across two separate browser sessions:
@@ -383,6 +457,8 @@ Test real-time impossible travel detection and automated account defense across 
 
 ---
 
+<a id="automated-testing--audit-verification"></a>
+<a id="-automated-testing--audit-verification"></a>
 ## 🧪 Automated Testing & Audit Verification
 
 The repository includes a comprehensive testing suite verifying API endpoints, impossible travel detection, rate limiting, and security remediations:
