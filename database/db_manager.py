@@ -5,7 +5,7 @@ Supports MongoDB (via PyMongo) with transparent local document-store fallback fo
 import os
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 
 DB_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "db.json")
@@ -36,6 +36,11 @@ class LocalCollection:
 
     def insert_one(self, doc: Dict[str, Any]) -> Dict[str, Any]:
         with self.parent.lock:
+            # DB-001: App-level duplicate prevention for users table in local fallback
+            if self.name == "users" and "email" in doc:
+                if self.find_one({"email": doc["email"]}):
+                    raise Exception(f"E11000 duplicate key error collection: users index: email_1 dup key: {{ email: '{doc['email']}' }}")
+
             docs = self.parent.get_collection_data(self.name)
             doc_copy = json.loads(json.dumps(doc))
             if "_id" not in doc_copy:
@@ -185,12 +190,31 @@ class LocalDatabase:
         }
         self._load()
 
+    def _prune_ttl_records(self):
+        """Prunes stale telemetry to prevent unbounded growth in db.json (ISSUE-14)."""
+        now = datetime.now(timezone.utc)
+        cw_logs = self.data.get("cloudwatch_logs", [])
+        if cw_logs:
+            cutoff_7d = (now - timedelta(days=7)).isoformat()
+            self.data["cloudwatch_logs"] = [
+                log for log in cw_logs
+                if log.get("timestamp", log.get("created_at", "")) >= cutoff_7d
+            ]
+        sec_events = self.data.get("security_events", [])
+        if sec_events:
+            cutoff_30d = (now - timedelta(days=30)).isoformat()
+            self.data["security_events"] = [
+                ev for ev in sec_events
+                if ev.get("timestamp", ev.get("created_at", "")) >= cutoff_30d
+            ]
+
     def _load(self):
         os.makedirs(os.path.dirname(os.path.abspath(self.filepath)), exist_ok=True)
         if os.path.exists(self.filepath):
             try:
                 with open(self.filepath, "r", encoding="utf-8") as f:
                     self.data = json.load(f)
+                self._prune_ttl_records()
             except Exception:
                 self.save()
         else:
@@ -198,6 +222,7 @@ class LocalDatabase:
 
     def save(self):
         """Atomic crash-safe persistence: writes to temp file then atomic rename/replace."""
+        self._prune_ttl_records()
         tmp_file = f"{self.filepath}.tmp_{threading.get_ident()}"
         try:
             with open(tmp_file, "w", encoding="utf-8") as f:
@@ -223,7 +248,30 @@ class LocalDatabase:
         return LocalCollection(name, self)
 
 
-# Singleton instance
+class MongoCollectionWrapper:
+    """Wrapper around raw PyMongo collection to support sort_key, reverse, and limit kwargs."""
+    def __init__(self, raw_collection):
+        self._col = raw_collection
+
+    def find(self, query=None, *args, **kwargs):
+        sort_key = kwargs.pop("sort_key", None)
+        reverse = kwargs.pop("reverse", False)
+        limit = kwargs.pop("limit", None)
+
+        filter_query = query if query is not None else {}
+        cursor = self._col.find(filter_query, *args, **kwargs)
+        if sort_key:
+            direction = -1 if reverse else 1
+            cursor = cursor.sort([(sort_key, direction)])
+        if limit:
+            cursor = cursor.limit(limit)
+        return cursor
+
+    def __getattr__(self, name):
+        return getattr(self._col, name)
+
+
+# Singleton local database instance
 _local_db = LocalDatabase(DB_FILE)
 
 class DatabaseManager:
@@ -245,13 +293,26 @@ class DatabaseManager:
                     self.db = self.client.get_database("account_security_db")
                 self.use_mongo = True
                 print(f"[DB] Connected successfully to live MongoDB instance (DB: {self.db.name}).")
+                self._init_mongo_indexes()
             except Exception as e:
                 print(f"[DB] Could not connect to MongoDB ({e}). Falling back to local document store.")
                 self.use_mongo = False
 
+    def _init_mongo_indexes(self):
+        """Creates required MongoDB indexes (Unique and TTL) safely."""
+        try:
+            import pymongo
+            self.db.users.create_index("email", unique=True)
+            self.db.cloudwatch_logs.create_index("created_at", expireAfterSeconds=7*24*3600)
+            self.db.security_events.create_index("created_at", expireAfterSeconds=30*24*3600)
+            self.db.password_resets.create_index("created_at", expireAfterSeconds=3600)
+            print("[DB] MongoDB indexes (Unique & TTL) initialized.")
+        except Exception as e:
+            print(f"[DB] Warning: Could not initialize MongoDB indexes: {e}")
+
     def get_collection(self, collection_name: str):
         if self.use_mongo and self.db is not None:
-            return self.db[collection_name]
+            return MongoCollectionWrapper(self.db[collection_name])
         return _local_db.get_collection(collection_name)
 
     @property

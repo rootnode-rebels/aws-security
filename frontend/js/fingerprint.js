@@ -81,24 +81,55 @@ async function generateCanvasHash() {
 
 async function getClientGeolocation() {
   return new Promise((resolve) => {
+    let hasResolved = false;
+
+    const fallbackToBackend = async () => {
+      if (hasResolved) return;
+      hasResolved = true;
+      try {
+        const res = await fetch("/api/security/detect-client-ip");
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.geo) {
+            return resolve({
+              lat: Number(data.geo.lat || 40.7128),
+              lon: Number(data.geo.lon || -74.0060),
+              city: data.city || data.geo.city || "New York",
+              country: data.country || data.geo.country || "US",
+              ip: data.ip || "127.0.0.1",
+              is_vpn: Boolean(data.is_vpn),
+              provider: data.provider || "Residential ISP"
+            });
+          }
+        }
+      } catch (err) {}
+      resolve({ lat: 40.7128, lon: -74.0060, city: "New York", country: "US" });
+    };
+
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          resolve({
-            lat: Number(pos.coords.latitude.toFixed(4)),
-            lon: Number(pos.coords.longitude.toFixed(4)),
-            city: "Current Location",
-            country: "User Region"
-          });
+          if (hasResolved) return;
+          hasResolved = true;
+          const lat = Number(pos.coords.latitude.toFixed(4));
+          const lon = Number(pos.coords.longitude.toFixed(4));
+          
+          fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`)
+            .then(res => res.json())
+            .then(data => {
+              const address = data.address || {};
+              const city = address.city || address.town || address.village || address.county || "Precise GPS Location";
+              const country = address.country || "Device";
+              resolve({ lat, lon, city, country });
+            })
+            .catch(() => resolve({ lat, lon, city: "Precise GPS Location", country: "Device" }));
         },
-        () => {
-          // Default fallback (New York, US)
-          resolve({ lat: 40.7128, lon: -74.0060, city: "New York", country: "US" });
-        },
-        { timeout: 3000 }
+        () => fallbackToBackend(),
+        { enableHighAccuracy: true, timeout: 5000 }
       );
     } else {
-      resolve({ lat: 40.7128, lon: -74.0060, city: "New York", country: "US" });
+      fallbackToBackend();
     }
   });
 }
+

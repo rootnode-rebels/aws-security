@@ -18,6 +18,7 @@ async function checkCurrentUser() {
     const isPrimary = (res.data.is_primary_device !== false && res.data.device_tier !== "SECONDARY");
     localStorage.setItem("is_primary_device", isPrimary ? "true" : "false");
     renderUserPortal();
+    if (typeof updateAuthUI === "function") updateAuthUI();
     loadUserSessions(true);
     loadUserAlerts();
     
@@ -36,24 +37,23 @@ async function checkCurrentUser() {
       }, 2000);
     }
   } else {
-    const wasPrimary = localStorage.getItem("is_primary_device") === "true";
-    if (!wasPrimary) {
-      AppState.token = null;
-      localStorage.removeItem("cyber_token");
-      if (userPollingInterval) {
-        clearInterval(userPollingInterval);
-        userPollingInterval = null;
-      }
-      if (timerWorker) {
-        timerWorker.postMessage("stop");
-        timerWorker = null;
-      }
-      if (sseConnection) {
-        sseConnection.close();
-        sseConnection = null;
-      }
+    AppState.token = null;
+    AppState.user = null;
+    localStorage.removeItem("cyber_token");
+    if (userPollingInterval) {
+      clearInterval(userPollingInterval);
+      userPollingInterval = null;
+    }
+    if (timerWorker) {
+      timerWorker.postMessage("stop");
+      timerWorker = null;
+    }
+    if (sseConnection) {
+      sseConnection.close();
+      sseConnection = null;
     }
     renderUserPortal();
+    if (typeof updateAuthUI === "function") updateAuthUI();
   }
 }
 
@@ -62,11 +62,23 @@ function renderUserPortal() {
   const dashboardContainer = document.getElementById("portal-dashboard-container");
 
   if (!AppState.user) {
-    if (authContainer) authContainer.style.display = "block";
-    if (dashboardContainer) dashboardContainer.style.display = "none";
+    if (authContainer) {
+      authContainer.classList.remove("hidden");
+      authContainer.style.setProperty("display", "flex", "important");
+    }
+    if (dashboardContainer) {
+      dashboardContainer.classList.add("hidden");
+      dashboardContainer.style.setProperty("display", "none", "important");
+    }
   } else {
-    if (authContainer) authContainer.style.display = "none";
-    if (dashboardContainer) dashboardContainer.style.display = "block";
+    if (authContainer) {
+      authContainer.classList.add("hidden");
+      authContainer.style.setProperty("display", "none", "important");
+    }
+    if (dashboardContainer) {
+      dashboardContainer.classList.remove("hidden");
+      dashboardContainer.style.setProperty("display", "block", "important");
+    }
 
     // Populate user profile info
     const nameEl = document.getElementById("user-display-name");
@@ -84,7 +96,7 @@ function renderUserPortal() {
 
     if (statusEl) {
       statusEl.textContent = isFrozen ? "LOCKED (FROZEN)" : AppState.user.status;
-      statusEl.className = `badge ${!isFrozen && AppState.user.status === 'ACTIVE' ? 'badge-low' : 'badge-high'}`;
+      statusEl.className = `capsule-badge ${!isFrozen && AppState.user.status === 'ACTIVE' ? 'capsule-emerald' : 'capsule-crimson'}`;
     }
     if (lastLoginEl && AppState.user.last_login) {
       const city = AppState.user.last_login.geo?.city || "New York";
@@ -110,11 +122,12 @@ function renderUserPortal() {
     }
 
     const roleBadge = document.getElementById("user-role-badge");
-    const isRootAdmin = AppState.user.is_root_admin || AppState.user.role === "ROOT_ADMIN" || AppState.user.email === "demo@awssecurity.io";
+    const isSuper = (typeof isSuperAdmin === "function") ? isSuperAdmin(AppState.user) : (AppState.user.is_super_admin || AppState.user.role === "SUPER_ADMIN");
     if (roleBadge) {
-      if (isRootAdmin) {
+      if (isSuper) {
         roleBadge.style.display = "inline-flex";
-        roleBadge.innerHTML = '<span class="pulse-dot pulse-dot-emerald"></span>👑 ROOT ADMIN';
+        roleBadge.className = "capsule-badge capsule-amber font-mono";
+        roleBadge.innerHTML = '<span class="pulse-dot pulse-dot-amber"></span>👑 SUPER ADMIN';
       } else {
         roleBadge.style.display = "none";
       }
@@ -307,13 +320,32 @@ async function handleRegister(e) {
   });
 
   if (res.ok) {
-    showToast("Account created as Root Admin! 👑 Please sign in.", "success");
-    // Switch to login tab
-    switchAuthTab("login");
-    const loginEmail = document.getElementById("login-email");
-    if (loginEmail) loginEmail.value = email;
-    const loginPass = document.getElementById("login-password");
-    if (loginPass) loginPass.focus();
+    if (res.data.requires_verification) {
+      showToast(res.data.message, "info");
+      document.getElementById("verify-email-hidden").value = res.data.email;
+      openModal("modal-email-verification");
+      
+      // Auto-fill code for demo environment since real SNS email is offline
+      if (res.data.demo_verification_code) {
+        setTimeout(() => {
+          const verifyInput = document.getElementById("verify-code-input");
+          if (verifyInput) {
+            verifyInput.value = res.data.demo_verification_code;
+            showToast("Demo auto-fill: Verification code injected.", "info");
+          }
+        }, 600);
+      }
+    } else {
+      showToast("Account created successfully! Please sign in.", "success");
+      switchAuthTab("login");
+      const loginEmail = document.getElementById("login-email");
+      if (loginEmail) loginEmail.value = email;
+      const loginPass = document.getElementById("login-password");
+      if (loginPass) {
+        loginPass.value = password;
+        loginPass.focus();
+      }
+    }
   } else {
     let errorMsg = "Registration failed. Check inputs.";
     if (typeof res.data?.detail === "string") {
@@ -333,14 +365,139 @@ async function handleRegister(e) {
 function autoFillDemoUser() {
   const emailInput = document.getElementById("login-email");
   const passInput = document.getElementById("login-password");
-  if (emailInput) emailInput.value = "demo@awssecurity.io";
-  if (passInput) passInput.value = "AWSSecurity#2026";
-  showToast("Demo user loaded: demo@awssecurity.io (Sachin)", "info");
+  if (emailInput) emailInput.value = "demouser@mail.com";
+  if (passInput) passInput.value = "DemoUser.AWS@29";
+  showToast("Demo user loaded: demouser@mail.com", "info");
 }
 
+function showDeviceConflictModal(data) {
+  const devEl = document.getElementById("conflict-device-name");
+  const locEl = document.getElementById("conflict-device-loc");
+  if (devEl) devEl.textContent = data.active_device || "Another Active Device";
+  if (locEl) locEl.textContent = `${data.active_location || "Active Location"} (${data.active_ip || "Remote IP"})`;
+  openModal("modal-superadmin-conflict");
+  showToast("Active Super Admin session detected on another device.", "warning");
+}
+window.showDeviceConflictModal = showDeviceConflictModal;
+
+function confirmTerminateOtherSessions() {
+  closeModal("modal-superadmin-conflict");
+  handleLogin(null, true);
+}
+window.confirmTerminateOtherSessions = confirmTerminateOtherSessions;
+
+// VPN Presets Data for fast local switching in presentations
+const VPN_PRESETS_CLIENT = {
+  "133.242.18.5": { city: "Tokyo", country: "Japan", lat: 35.6762, lon: 139.6503, provider: "SAKURA Cloud / Datacenter VPN", is_vpn: true, speed: "8,500 km/h (Impossible Travel)" },
+  "185.220.101.5": { city: "London", country: "United Kingdom", lat: 51.5074, lon: -0.1278, provider: "Tor Exit Relay", is_vpn: true, speed: "Tor Anomaly" },
+  "45.33.32.1": { city: "Frankfurt", country: "Germany", lat: 50.1109, lon: 8.6821, provider: "Linode / Commercial VPN", is_vpn: true, speed: "6,200 km/h (Impossible Travel)" },
+  "103.253.144.1": { city: "Singapore", country: "Singapore", lat: 1.3521, lon: 103.8198, provider: "Commercial VPN", is_vpn: true, speed: "15,000 km/h (Impossible Travel)" },
+  "185.100.87.5": { city: "Amsterdam", country: "Netherlands", lat: 52.3676, lon: 4.9041, provider: "Datacenter Proxy", is_vpn: true, speed: "5,800 km/h (Impossible Travel)" },
+  "198.98.56.2": { city: "Zurich", country: "Switzerland", lat: 47.3769, lon: 8.5417, provider: "Swiss Privacy Relay", is_vpn: true, speed: "6,300 km/h (Impossible Travel)" },
+  "162.247.74.200": { city: "Sydney", country: "Australia", lat: -33.8688, lon: 151.2093, provider: "Cloudflare WARP", is_vpn: true, speed: "16,000 km/h (Impossible Travel)" },
+  "198.51.100.42": { city: "Philadelphia", country: "United States", lat: 39.9526, lon: -75.1652, provider: "Regional ISP (~150 km commute)", is_vpn: false, speed: "Human Coverable Distance" },
+  "198.51.100.88": { city: "Boston", country: "United States", lat: 42.3601, lon: -71.0589, provider: "Regional ISP (~300 km regional)", is_vpn: false, speed: "Human Coverable Distance" },
+  "198.51.100.1": { city: "New York", country: "United States", lat: 40.7128, lon: -74.0060, provider: "Primary Office / Clean Residential", is_vpn: false, speed: "Base Location" }
+};
+
+let activeSimulatedIp = null;
+let activeSimulatedGeo = null;
+
+async function refreshClientOrigin() {
+  const badge = document.getElementById("origin-detect-badge");
+  const detail = document.getElementById("origin-detail-text");
+  if (badge) {
+    badge.textContent = "Detecting...";
+    badge.style.background = "rgba(56, 189, 248, 0.15)";
+    badge.style.color = "#38bdf8";
+  }
+
+  try {
+    const res = await fetch("/api/security/detect-client-ip");
+    if (res.ok) {
+      const data = await res.json();
+      activeSimulatedIp = data.ip;
+      activeSimulatedGeo = {
+        lat: data.geo.lat,
+        lon: data.geo.lon,
+        city: data.city,
+        country: data.country
+      };
+      AppState.geo = activeSimulatedGeo;
+
+      if (badge) {
+        if (data.is_vpn) {
+          badge.textContent = `VPN Active: ${data.city}`;
+          badge.style.background = "rgba(239, 68, 68, 0.2)";
+          badge.style.color = "#f87171";
+          badge.style.borderColor = "rgba(239, 68, 68, 0.4)";
+        } else {
+          badge.textContent = `${data.city}, ${data.country}`;
+          badge.style.background = "rgba(16, 185, 129, 0.15)";
+          badge.style.color = "#34d399";
+          badge.style.borderColor = "rgba(16, 185, 129, 0.3)";
+        }
+      }
+      if (detail) {
+        detail.textContent = `IP: ${data.ip} • Provider: ${data.provider}`;
+      }
+      return;
+    }
+  } catch (err) {
+    console.warn("Origin detection fallback:", err);
+  }
+
+  if (badge) badge.textContent = "Local Network (NY)";
+  if (detail) detail.textContent = "IP: 127.0.0.1 • Localhost Emulation";
+}
+
+function onVpnPresetChange(value) {
+  const badge = document.getElementById("origin-detect-badge");
+  const detail = document.getElementById("origin-detail-text");
+
+  if (value === "AUTO") {
+    refreshClientOrigin();
+    return;
+  }
+
+  const preset = VPN_PRESETS_CLIENT[value];
+  if (preset) {
+    activeSimulatedIp = value;
+    activeSimulatedGeo = {
+      lat: preset.lat,
+      lon: preset.lon,
+      city: preset.city,
+      country: preset.country
+    };
+    AppState.geo = activeSimulatedGeo;
+
+    if (badge) {
+      if (preset.is_vpn) {
+        badge.textContent = `VPN: ${preset.city}`;
+        badge.style.background = "rgba(239, 68, 68, 0.2)";
+        badge.style.color = "#f87171";
+        badge.style.borderColor = "rgba(239, 68, 68, 0.4)";
+      } else {
+        badge.textContent = `Regional: ${preset.city}`;
+        badge.style.background = "rgba(56, 189, 248, 0.15)";
+        badge.style.color = "#38bdf8";
+        badge.style.borderColor = "rgba(56, 189, 248, 0.3)";
+      }
+    }
+    if (detail) {
+      detail.textContent = `IP: ${value} • ${preset.provider} • ${preset.speed}`;
+    }
+  }
+}
+
+// Auto-trigger origin detection on load
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(refreshClientOrigin, 400);
+});
+
 // Login Handler
-async function handleLogin(e) {
-  e.preventDefault();
+async function handleLogin(e, terminateOthers = false) {
+  if (e && e.preventDefault) e.preventDefault();
   const email = document.getElementById("login-email").value.trim();
   const password = document.getElementById("login-password").value;
 
@@ -348,8 +505,13 @@ async function handleLogin(e) {
     email,
     password,
     fingerprint: AppState.fingerprint,
-    geo: AppState.geo
+    geo: activeSimulatedGeo || AppState.geo,
+    terminate_other_sessions: terminateOthers === true
   };
+
+  if (activeSimulatedIp) {
+    payload.spoofed_ip = activeSimulatedIp;
+  }
 
   const res = await apiFetch("/api/auth/login", {
     method: "POST",
@@ -357,6 +519,11 @@ async function handleLogin(e) {
   });
 
   if (res.ok) {
+    if (res.data.status === "ANOTHER_DEVICE_ACTIVE" || res.data.prompt_logout_others) {
+      showDeviceConflictModal(res.data);
+      return;
+    }
+
     if (res.data.status === "MFA_REQUIRED") {
       // Step-Up / Secondary Device MFA Challenge
       document.getElementById("mfa-email-hidden").value = email;
@@ -373,6 +540,16 @@ async function handleLogin(e) {
 
       openModal("modal-mfa-challenge");
       showToast("Verification code dispatched to your Primary Device screen.", "warning");
+
+      // Auto-fill MFA code for demo environment
+      if (res.data.demo_mfa_code) {
+        setTimeout(() => {
+          if (codeInput) {
+            codeInput.value = res.data.demo_mfa_code;
+            showToast("Demo auto-fill: MFA code injected.", "info");
+          }
+        }, 600);
+      }
 
       // Start automatic cross-device polling: if Primary Device clicks 'Approve Device', sign in automatically!
       if (window.mfaPollInterval) clearInterval(window.mfaPollInterval);
@@ -427,6 +604,8 @@ async function handleLogin(e) {
     if (res.status === 403) {
       showToast("🚨 Sign-in blocked: Unusual or suspicious location detected.", "error");
       playSecurityAlertSound();
+    } else if (res.status === 500) {
+      showToast("Server error during sign-in. Please try again or check server logs.", "error");
     } else {
       showToast(res.data?.detail || "Incorrect email or password. Please try again.", "error");
     }
@@ -483,6 +662,8 @@ async function handleVerifyMFA(e) {
       window.mfaPollInterval = null;
     }
     closeModal("modal-mfa-challenge");
+    closeModal("modal-secondary-device-approval");
+    stopTitlePulse();
     AppState.token = res.data.token;
     localStorage.setItem("cyber_token", res.data.token);
     showToast("Identity verified via code. Access granted!", "success");
@@ -600,6 +781,8 @@ async function executeSelfUnlock() {
     const unfreezeBanner = document.getElementById("primary-unfreeze-banner");
     if (unfreezeBanner) unfreezeBanner.style.display = "none";
     await checkCurrentUser();
+    await loadUserAlerts(true);
+    await loadUserSessions(true);
   } else {
     showToast(res.data?.detail || "Could not restore account.", "error");
   }
@@ -609,7 +792,7 @@ window.executeSelfUnlock = executeSelfUnlock;
 // Active Sessions Controller (Primary Portal Preservation & Remote Device Termination)
 async function loadUserSessions(force = false) {
   const container = document.getElementById("sessions-table-body");
-  if (!container || isFetchingSessions) return;
+  if (!container || isFetchingSessions || !AppState.token) return;
 
   isFetchingSessions = true;
   try {
@@ -729,14 +912,14 @@ async function loadUserSessions(force = false) {
               <div class="session-device-cell">
                 <span class="material-symbols-outlined session-icon ${isPrimarySession ? 'text-emerald' : 'text-amber'}">${devIcon}</span>
                 <div>
-                  <div class="session-device-name">${s.device || 'Web Browser'}</div>
+                  <div class="session-device-name">${escapeHtml(s.device || 'Web Browser')}&nbsp;<span class="copy-btn" onclick="copyToClipboard('${escapeHtml(s.session_id)}', this)" title="Copy Session ID">📋</span></div>
                   <div class="session-device-badge-wrap">${deviceBadge}</div>
                 </div>
               </div>
             </td>
             <td>
-              <div class="session-geo">${s.geo?.city || 'Local Location'}, ${s.geo?.country || 'US'}</div>
-              <div class="session-ip-mono text-muted" style="font-size: 0.76rem;">IP: ${s.ip_address}</div>
+              <div class="session-geo">${escapeHtml(s.geo?.city || 'Local Location')}, ${escapeHtml(s.geo?.country || 'US')}</div>
+              <div class="session-ip-mono text-muted" style="font-size: 0.76rem;">IP: ${escapeHtml(s.ip_address || '127.0.0.1')}</div>
             </td>
             <td>
               <span class="${isCurrent ? 'text-emerald' : 'text-secondary'} session-lifetime" style="display: flex; align-items: center; gap: 5px;">
@@ -784,6 +967,7 @@ async function killAllOtherSessions() {
     const count = res.data?.terminated_count || 0;
     showToast(`Signed out of ${count} remote device(s). Your main device remains active.`, "success");
     loadUserSessions(true);
+    loadUserAlerts(true);
   } else {
     showToast(res.data?.detail || "Failed to sign out other devices.", "error");
   }
@@ -958,8 +1142,22 @@ function connectSecurityStream() {
     sseConnection.addEventListener("alert", (e) => {
       try {
         const data = JSON.parse(e.data);
-        if (data.type === "SECONDARY_DEVICE_APPROVAL_REQUEST") {
+        if (data.type === "SESSION_REVOKED") {
+          showToast(`⚠️ ${data.reason || 'Session terminated: Super Admin logged in on another device.'}`, "warning");
+          handleLogout();
+          return;
+        } else if (data.type === "NOTIFICATION_DISPATCHED") {
+          handleIncomingDispatchedNotification(data.notification);
+        } else if (data.type === "SECONDARY_DEVICE_APPROVAL_REQUEST") {
           handleIncomingSecondaryApproval(data);
+        } else if (data.type === "SECONDARY_DEVICE_VERIFIED" || data.type === "SECONDARY_APPROVED") {
+          // Immediately dismiss the incoming approval popup and pulse on Primary Device!
+          closeModal("modal-secondary-device-approval");
+          closeModal("modal-mfa-challenge");
+          stopTitlePulse();
+          showToast(`✅ ${data.message || 'Secondary device successfully verified and signed in.'}`, "success");
+          loadUserAlerts(true);
+          loadUserSessions(true);
         } else {
           if (typeof showSecurityAlertBanner === "function") {
             showSecurityAlertBanner(data);
@@ -984,7 +1182,7 @@ function connectSecurityStream() {
 async function loadUserAlerts(force = false) {
   const container = document.getElementById("alerts-inbox-container");
   const badge = document.getElementById("alerts-count-badge");
-  if (!container || isFetchingAlerts) return;
+  if (!container || isFetchingAlerts || !AppState.token) return;
 
   isFetchingAlerts = true;
   try {
@@ -994,6 +1192,21 @@ async function loadUserAlerts(force = false) {
       if (badge) badge.textContent = alerts.length;
 
       const isUserOnSecondary = AppState.user && (AppState.user.is_primary_device === false || AppState.user.device_tier === "SECONDARY");
+
+      // Cross-Device Auto-Dismiss: If modal-secondary-device-approval is active on this device,
+      // verify if any approval request is still pending. If the secondary device has verified via code,
+      // the alert is now RESOLVED_VERIFIED, so automatically close the popup and stop pulsing!
+      const secModal = document.getElementById("modal-secondary-device-approval");
+      if (secModal && secModal.classList.contains("active")) {
+        const hasPendingApproval = alerts.some(a => 
+          a.type === "SECONDARY_DEVICE_APPROVAL_REQUEST" && a.status === "PENDING_APPROVAL"
+        );
+        if (!hasPendingApproval) {
+          closeModal("modal-secondary-device-approval");
+          stopTitlePulse();
+          showToast("✅ Secondary device successfully signed in. Verification popup closed.", "success");
+        }
+      }
 
       // Check for newly arrived alerts
       const newAlerts = alerts.filter(a => !lastSeenAlertIds.has(a.alert_id));
@@ -1041,7 +1254,30 @@ async function loadUserAlerts(force = false) {
       alerts.forEach(a => lastSeenAlertIds.add(a.alert_id));
       isFirstAlertsLoad = false;
 
-      const signature = JSON.stringify(alerts.map(a => [a.alert_id, a.risk_score, a.status]));
+      // Update Hero Bento Security Status card based on active threats
+      const hasActiveThreat = alerts.some(a => a.status !== "RESOLVED" && a.status !== "RESOLVED_VERIFIED" && a.status !== "RESOLVED_APPROVED" && ((a.risk_score || 0) >= 60 || a.type === "BRUTE_FORCE_LOCKOUT"));
+      const mSecStatus = document.getElementById("metric-security-status");
+      const mSecIcon = document.getElementById("metric-security-icon");
+      const mSecDot = document.getElementById("metric-security-dot");
+      const mSecSub = document.getElementById("metric-security-sub");
+      const mSecBadge = document.getElementById("metric-security-badge");
+
+      if (mSecStatus && mSecIcon) {
+        if (hasActiveThreat) {
+          mSecStatus.textContent = "Threat Detected";
+          mSecIcon.className = "bento-icon-box bento-icon-crimson";
+          if (mSecDot) mSecDot.className = "pulse-dot pulse-dot-crimson";
+          if (mSecSub) mSecSub.textContent = "Action recommended";
+          if (mSecBadge) mSecBadge.textContent = "ALERT";
+        } else {
+          mSecStatus.textContent = "Safe";
+          mSecIcon.className = "bento-icon-box bento-icon-emerald";
+          if (mSecDot) mSecDot.className = "pulse-dot pulse-dot-emerald";
+          if (mSecSub) mSecSub.textContent = "Automatic protection on";
+          if (mSecBadge) mSecBadge.textContent = "ENABLED";
+        }
+      }
+
       if (!force && signature === lastAlertsSignature) {
         return;
       }
@@ -1134,9 +1370,9 @@ async function loadUserAlerts(force = false) {
         } else if (isSecondaryApproval) {
           if (isPending) {
             actionsHtml = `
-              <button class="btn btn-primary btn-sm glow-emerald" onclick="executeApproveSecondary(true, '${a.temp_token || 'LATEST'}')" style="background: linear-gradient(135deg, #10b981, #059669); font-weight: 700; border: none; box-shadow: 0 0 15px rgba(16, 185, 129, 0.4); padding: 0.45rem 0.9rem;">
+              <button class="btn btn-primary btn-sm" onclick="executeApproveSecondary(true, '${a.temp_token || 'LATEST'}')">
                 <span class="material-symbols-outlined" style="font-size: 1rem;">check_circle</span>
-                <span>Allow Sign-In (1-Click)</span>
+                <span>Allow Manually (1-Click Approval)</span>
               </button>
               <button class="btn btn-danger btn-sm" onclick="executeApproveSecondary(false, '${a.temp_token || 'LATEST'}')">
                 <span class="material-symbols-outlined" style="font-size: 0.9rem;">cancel</span>
@@ -1161,7 +1397,7 @@ async function loadUserAlerts(force = false) {
               <button class="btn btn-secondary btn-sm" onclick="dismissUserAlert('${a.alert_id}')">
                 <span>Dismiss</span>
               </button>
-              <button class="btn btn-warning btn-sm" onclick="openModal('modal-reset-password')" title="Change your password if you think someone guessed it">
+              <button class="btn btn-warning btn-sm" onclick="openPasswordModal('auth')" title="Change your password if you think someone guessed it">
                 <span class="material-symbols-outlined" style="font-size: 0.9rem;">lock_reset</span>
                 <span>Change Password</span>
               </button>
@@ -1208,30 +1444,30 @@ async function loadUserAlerts(force = false) {
               </div>
               ${riskBadge}
             </div>
-            <div style="font-size: 0.8rem; color: #e2e8f0; line-height: 1.4;">
-              ${a.reason || 'Suspicious access detected.'}
+            <div style="font-size: 0.82rem; color: #e2e8f0; line-height: 1.45;">
+              ${escapeHtml(a.reason || 'Suspicious access detected.')}
             </div>
             ${isSecondaryApproval && vCode ? `
-              <div style="margin: 0.75rem 0; padding: 0.75rem 1rem; background: rgba(16, 185, 129, 0.08); border: 1px dashed rgba(16, 185, 129, 0.4); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-                <div>
-                  <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 2px;">Secondary Device Verification Code:</div>
-                  <div style="font-family: var(--font-mono); font-size: 1.6rem; font-weight: 800; letter-spacing: 0.25em; color: var(--accent-emerald); text-shadow: 0 0 10px rgba(16, 185, 129, 0.5);">${vCode}</div>
+              <div class="verification-code-pod">
+                <div class="vcode-label-group">
+                  <span class="vcode-micro-label">Secondary Device Verification Code</span>
+                  <span class="vcode-digits">${escapeHtml(vCode)}</span>
                 </div>
                 ${isPending ? `
-                  <span class="capsule-badge capsule-amber" style="font-size: 0.72rem; padding: 0.3rem 0.6rem;">
+                  <span class="capsule-badge capsule-amber font-mono">
                     <span class="pulse-dot pulse-dot-amber"></span>AWAITING APPROVAL
                   </span>
                 ` : `
-                  <span class="capsule-badge capsule-emerald" style="font-size: 0.72rem; padding: 0.3rem 0.6rem;">
-                    ✅ ${a.status || 'RESOLVED'}
+                  <span class="capsule-badge capsule-emerald font-mono">
+                    <span class="pulse-dot pulse-dot-emerald"></span>${escapeHtml(a.status || 'RESOLVED')}
                   </span>
                 `}
               </div>
             ` : ''}
             <div class="alert-meta-box">
-              <div><span class="text-muted">Location:</span> <strong>${a.origin || 'Unknown'}</strong></div>
-              <div><span class="text-muted">${ipLabel}</span> <code class="font-mono text-cyan">${a.ip}</code></div>
-              <div><span class="text-muted">${clientLabel}</span> ${a.device || 'Web Browser'}</div>
+              <div><span class="text-muted">Location:</span> <strong>${escapeHtml(a.origin || 'Unknown')}</strong></div>
+              <div><span class="text-muted">${ipLabel}</span> <code class="font-mono text-cyan">${escapeHtml(a.ip || '')}</code></div>
+              <div><span class="text-muted">${clientLabel}</span> ${escapeHtml(a.device || 'Web Browser')}</div>
             </div>
             <div class="alert-actions-bar">
               ${actionsHtml}
@@ -1312,18 +1548,95 @@ async function handleDeleteAccount(e) {
 }
 
 // Forgot & Reset Password
+function switchPasswordMode(mode) {
+  const formAuth = document.getElementById("form-change-password-auth");
+  const formToken = document.getElementById("form-reset-password-token");
+  const btnAuth = document.getElementById("tab-pw-auth");
+  const btnToken = document.getElementById("tab-pw-token");
+
+  if (mode === "auth") {
+    if (formAuth) formAuth.style.display = "block";
+    if (formToken) formToken.style.display = "none";
+    if (btnAuth) btnAuth.classList.add("active");
+    if (btnToken) btnToken.classList.remove("active");
+  } else {
+    if (formAuth) formAuth.style.display = "none";
+    if (formToken) formToken.style.display = "block";
+    if (btnAuth) btnAuth.classList.remove("active");
+    if (btnToken) btnToken.classList.add("active");
+  }
+}
+window.switchPasswordMode = switchPasswordMode;
+
+function openPasswordModal(preferredMode) {
+  const isAuth = !!(AppState && AppState.user && AppState.token);
+  const mode = preferredMode || (isAuth ? "auth" : "token");
+  switchPasswordMode(mode);
+  openModal("modal-reset-password");
+}
+window.openPasswordModal = openPasswordModal;
+
+async function autoGenerateResetToken() {
+  const targetEmail = (AppState && AppState.user && AppState.user.email) ? AppState.user.email : "demo@awssecurity.io";
+  showToast(`Requesting recovery token for ${targetEmail}...`, "info");
+  const res = await apiFetch("/api/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email: targetEmail })
+  });
+  if (res.data?.demo_reset_token) {
+    const input = document.getElementById("reset-token-input");
+    if (input) input.value = res.data.demo_reset_token;
+    showToast("✅ Single-use recovery token generated & auto-filled!", "success");
+  } else {
+    showToast(res.data?.message || "Reset token dispatched if account exists.", "info");
+  }
+}
+window.autoGenerateResetToken = autoGenerateResetToken;
+
+async function handleChangePasswordAuth(e) {
+  e.preventDefault();
+  const currentPassword = document.getElementById("change-curr-password").value;
+  const newPassword = document.getElementById("change-new-password").value;
+
+  if (!AppState.token) {
+    showToast("Please sign in or use the Single-Use Token tab.", "warning");
+    switchPasswordMode("token");
+    return;
+  }
+
+  const res = await apiFetch("/api/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+  });
+
+  if (res.ok) {
+    closeModal("modal-reset-password");
+    document.getElementById("change-curr-password").value = "";
+    document.getElementById("change-new-password").value = "";
+    showToast("Master password successfully updated! Remote sessions revoked.", "success");
+  } else {
+    showToast(res.data?.detail || "Failed to update password. Check current password.", "error");
+  }
+}
+window.handleChangePasswordAuth = handleChangePasswordAuth;
+
 async function handleForgotPassword(e) {
   e.preventDefault();
   const email = document.getElementById("forgot-email").value.trim();
+  showToast(`🚀 Dispatching secure recovery token to ${email} via Amazon SNS...`, "info");
   const res = await apiFetch("/api/auth/forgot-password", {
     method: "POST",
     body: JSON.stringify({ email })
   });
   closeModal("modal-forgot-password");
-  showToast(res.data?.message || "Password reset link dispatched if account exists.", "info");
+  showToast(res.data?.message || `Password recovery notification dispatched to ${email} via Amazon SNS.`, "success");
   if (res.data?.demo_reset_token) {
-    document.getElementById("reset-token-input").value = res.data.demo_reset_token;
-    openModal("modal-reset-password");
+    const input = document.getElementById("reset-token-input");
+    if (input) input.value = res.data.demo_reset_token;
+    openPasswordModal("token");
+  }
+  if (typeof fetchDispatchedNotifications === "function") {
+    fetchDispatchedNotifications();
   }
 }
 
@@ -1331,6 +1644,12 @@ async function handleResetPassword(e) {
   e.preventDefault();
   const token = document.getElementById("reset-token-input").value.trim();
   const newPassword = document.getElementById("reset-new-password").value;
+
+  if (!token) {
+    showToast("Please enter or auto-generate a recovery token.", "warning");
+    return;
+  }
+
   const res = await apiFetch("/api/auth/reset-password", {
     method: "POST",
     body: JSON.stringify({ token, new_password: newPassword })
@@ -1356,10 +1675,299 @@ function handleLogout() {
   AppState.token = null;
   AppState.user = null;
   localStorage.removeItem("cyber_token");
+  localStorage.removeItem("is_primary_device");
   if (userPollingInterval) {
     clearInterval(userPollingInterval);
     userPollingInterval = null;
   }
   showToast("Logged out securely.", "info");
+
+  // Cleanly navigate back to home / sign-in portal
+  if (typeof switchTab === "function") {
+    switchTab("user-portal");
+  }
+  if (typeof switchAuthTab === "function") {
+    switchAuthTab("login");
+  }
+
   renderUserPortal();
+  if (typeof updateAuthUI === "function") updateAuthUI();
 }
+
+// =========================================================================
+// Amazon SNS & Dispatched Security Notifications Mailbox
+// =========================================================================
+let cachedDispatchedNotifications = [];
+
+async function openDispatchedMailbox() {
+  openModal("modal-dispatched-notifications");
+  await fetchDispatchedNotifications();
+}
+window.openDispatchedMailbox = openDispatchedMailbox;
+
+async function fetchDispatchedNotifications() {
+  const listEl = document.getElementById("dispatched-notifications-list");
+  if (!listEl) return;
+  
+  try {
+    const res = await apiFetch("/api/security/dispatched-notifications");
+    if (res.ok && res.data) {
+      cachedDispatchedNotifications = res.data.notifications || [];
+      const totalEl = document.getElementById("sns-total-count");
+      if (totalEl) totalEl.textContent = cachedDispatchedNotifications.length;
+      // Sync the nav button badge
+      if (typeof updateSNSNavBadge === "function") updateSNSNavBadge(cachedDispatchedNotifications.length);
+
+      const badgeEl = document.getElementById("sns-status-badge");
+      if (badgeEl) {
+        if (res.data.engine_description) {
+          badgeEl.textContent = res.data.engine_description;
+          badgeEl.style.color = (res.data.sns_topic_configured || res.data.smtp_configured) ? "#10b981" : "#38bdf8";
+        } else {
+          badgeEl.textContent = res.data.sns_topic_configured ? "AWS SNS Topic (Connected)" : "Amazon SNS (Emulated)";
+          badgeEl.style.color = res.data.sns_topic_configured ? "#10b981" : "#38bdf8";
+        }
+      }
+
+      const guidanceEl = document.getElementById("sns-delivery-guidance");
+      if (guidanceEl) {
+        if (res.data.is_gmail && res.data.smtp_configured) {
+          const u = res.data.engine_status?.smtp_user || "";
+          guidanceEl.style.borderColor = "rgba(16, 185, 129, 0.4)";
+          guidanceEl.style.background = "rgba(16, 185, 129, 0.08)";
+          guidanceEl.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="font-size: 1rem;">✅</span>
+              <span><strong style="color: #6ee7b7;">Gmail Live Delivery Active:</strong> Dispatched from <code style="color: #fff;">${escapeHtml(u)}</code>. Security emails land directly in the recipient's real Gmail inbox!</span>
+            </div>
+            <div style="font-size: 0.72rem; color: #a7f3d0;">Standard TLS (smtp.gmail.com:587)</div>
+          `;
+        } else if (res.data.sns_topic_configured) {
+          guidanceEl.style.borderColor = "rgba(16, 185, 129, 0.4)";
+          guidanceEl.style.background = "rgba(16, 185, 129, 0.08)";
+          guidanceEl.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="font-size: 1rem;">✅</span>
+              <span><strong style="color: #6ee7b7;">Amazon SNS Topic Active:</strong> Connected to AWS Cloud SNS topic.</span>
+            </div>
+          `;
+        } else {
+          guidanceEl.style.borderColor = "rgba(56, 189, 248, 0.25)";
+          guidanceEl.style.background = "rgba(15, 23, 42, 0.7)";
+          guidanceEl.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="font-size: 1rem;">ℹ️</span>
+              <span><strong style="color: #f1f5f9;">Offline Local Mode:</strong> Dispatched emails and reset tokens appear right here.</span>
+            </div>
+            <div style="font-size: 0.72rem; color: #38bdf8;">Want real Gmail delivery? Add your Gmail App Password to <code>.env</code> (see <code>.env.example</code>).</div>
+          `;
+        }
+      }
+
+      renderDispatchedNotifications(cachedDispatchedNotifications);
+    } else {
+      listEl.innerHTML = `<div style="text-align: center; color: #ef4444; padding: 2rem;">Failed to fetch dispatched notifications.</div>`;
+    }
+  } catch (err) {
+    console.error("Error fetching dispatched notifications:", err);
+  }
+}
+window.fetchDispatchedNotifications = fetchDispatchedNotifications;
+
+function renderDispatchedNotifications(list) {
+  const listEl = document.getElementById("dispatched-notifications-list");
+  if (!listEl) return;
+
+  if (!list || list.length === 0) {
+    listEl.innerHTML = `
+      <div style="text-align: center; color: var(--text-muted); padding: 3rem 1rem; border: 1px dashed rgba(255,255,255,0.1); border-radius: 8px;">
+        <div style="font-size: 2rem; margin-bottom: 0.5rem;">📭</div>
+        <div style="font-weight: 600; color: #cbd5e1;">No Dispatched Notifications Yet</div>
+        <p style="font-size: 0.8rem; margin: 0.5rem 0 0; color: #94a3b8;">
+          Trigger "Forgot Password", a suspicious login block, or send a test alert to see real-time Amazon SNS & Email delivery.
+        </p>
+      </div>
+    `;
+    return;
+  }
+
+  listEl.innerHTML = list.map(item => {
+    const ntype = item.notification_type || "SECURITY_NOTIFICATION";
+    let badgeColor = "#3b82f6";
+    let icon = "📧";
+
+    if (ntype === "PASSWORD_RESET_TOKEN") {
+      badgeColor = "#0ea5e9";
+      icon = "🔐";
+    } else if (ntype === "THREAT_BLOCKED") {
+      badgeColor = "#ef4444";
+      icon = "🚨";
+    } else if (ntype === "MFA_VERIFICATION_CODE") {
+      badgeColor = "#f59e0b";
+      icon = "🔑";
+    } else if (ntype === "PASSWORD_CHANGED") {
+      badgeColor = "#10b981";
+      icon = "🛡️";
+    } else if (ntype === "BRUTE_FORCE_LOCKOUT") {
+      badgeColor = "#dc2626";
+      icon = "⚠️";
+    } else if (ntype === "ACCOUNT_STATUS_CHANGE") {
+      badgeColor = "#8b5cf6";
+      icon = "🔒";
+    }
+
+    const timeStr = item.created_at ? new Date(item.created_at).toLocaleTimeString() + " " + new Date(item.created_at).toLocaleDateString() : "Just now";
+    const token = item.metadata?.token;
+    const warning = item.metadata?.delivery_warning;
+    const isFailed = item.status === "DELIVERY_FAILED";
+
+    return `
+      <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-left: 3px solid ${isFailed ? '#ef4444' : badgeColor}; border-radius: 6px; padding: 0.75rem 1rem; transition: background 0.2s;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.35rem;">
+          <div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+            <span style="font-size: 1rem;">${icon}</span>
+            <span style="font-size: 0.82rem; font-weight: 600; color: #f8fafc;">${escapeHtml(item.subject || 'Security Notification')}</span>
+            <span style="font-size: 0.65rem; background: ${badgeColor}22; color: ${badgeColor}; border: 1px solid ${badgeColor}55; padding: 1px 6px; border-radius: 4px; font-weight: 600;">
+              ${escapeHtml(ntype)}
+            </span>
+            <span style="font-size: 0.65rem; background: rgba(255,255,255,0.05); color: #94a3b8; border: 1px solid rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 4px;">
+              ${escapeHtml(item.channel || 'Amazon SNS')}
+            </span>
+          </div>
+          <span style="font-size: 0.7rem; color: var(--text-muted); white-space: nowrap;">${timeStr}</span>
+        </div>
+
+        <div style="font-size: 0.76rem; color: #cbd5e1; margin-bottom: 0.4rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+          <span><strong>To:</strong> <code style="color: #38bdf8;">${escapeHtml(item.recipient_email || '')}</code></span>
+          <span><strong>Status:</strong> <span style="color: ${isFailed ? '#ef4444' : '#10b981'};">${isFailed ? '⚠️ DISPATCH FAILED' : '● DELIVERED'}</span></span>
+        </div>
+
+        ${warning ? `
+          <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 4px; padding: 0.35rem 0.6rem; font-size: 0.72rem; color: #fbbf24; margin-bottom: 0.4rem;">
+            ⚠️ <strong>SMTP Note:</strong> ${escapeHtml(warning)}
+          </div>
+        ` : ''}
+
+        <div style="background: rgba(0, 0, 0, 0.35); border-radius: 4px; padding: 0.5rem 0.65rem; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; font-size: 0.75rem; color: #94a3b8; white-space: pre-wrap; line-height: 1.45; max-height: 140px; overflow-y: auto;">${escapeHtml(item.body_text || '')}</div>
+
+        ${token ? `
+          <div style="margin-top: 0.5rem; display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem;">
+            <button class="btn btn-primary btn-sm" style="font-size: 0.72rem; padding: 0.2rem 0.6rem;" onclick="useDispatchedToken('${escapeHtml(token)}')">
+              🎟️ Auto-Fill Reset Token
+            </button>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+function filterDispatchedNotifications() {
+  const query = (document.getElementById("sns-search-input")?.value || "").toLowerCase().trim();
+  if (!query) {
+    renderDispatchedNotifications(cachedDispatchedNotifications);
+    return;
+  }
+  const filtered = cachedDispatchedNotifications.filter(item => {
+    return (
+      (item.recipient_email && item.recipient_email.toLowerCase().includes(query)) ||
+      (item.subject && item.subject.toLowerCase().includes(query)) ||
+      (item.body_text && item.body_text.toLowerCase().includes(query)) ||
+      (item.notification_type && item.notification_type.toLowerCase().includes(query))
+    );
+  });
+  renderDispatchedNotifications(filtered);
+}
+window.filterDispatchedNotifications = filterDispatchedNotifications;
+
+function useDispatchedToken(token) {
+  closeModal("modal-dispatched-notifications");
+  const input = document.getElementById("reset-token-input");
+  if (input) input.value = token;
+  openPasswordModal("token");
+  showToast("Recovery token loaded into reset modal!", "success");
+}
+window.useDispatchedToken = useDispatchedToken;
+
+function handleIncomingDispatchedNotification(notif) {
+  if (!notif) return;
+  cachedDispatchedNotifications.unshift(notif);
+  const totalEl = document.getElementById("sns-total-count");
+  if (totalEl) totalEl.textContent = cachedDispatchedNotifications.length;
+
+  // Update the SNS nav button with unread count badge
+  updateSNSNavBadge(cachedDispatchedNotifications.length);
+
+  showToast(`📧 [Amazon SNS Dispatch] ${notif.subject || 'New notification delivered to ' + notif.recipient_email}`, "info");
+
+  const modal = document.getElementById("modal-dispatched-notifications");
+  if (modal && modal.classList.contains("active")) {
+    renderDispatchedNotifications(cachedDispatchedNotifications);
+  }
+}
+window.handleIncomingDispatchedNotification = handleIncomingDispatchedNotification;
+
+// Updates the SNS Inbox nav button with unread notification count
+function updateSNSNavBadge(count) {
+  const snsBtn = document.getElementById("btn-nav-sns");
+  if (!snsBtn) return;
+  // Remove existing badge
+  const existingBadge = snsBtn.querySelector(".sns-unread-badge");
+  if (existingBadge) existingBadge.remove();
+  if (count > 0) {
+    const badge = document.createElement("span");
+    badge.className = "sns-unread-badge";
+    badge.textContent = count > 99 ? "99+" : count;
+    badge.style.cssText = "position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;min-width:18px;height:18px;font-size:0.65rem;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px;border:2px solid var(--bg-primary,#060d1e);pointer-events:none;";
+    snsBtn.style.position = "relative";
+    snsBtn.appendChild(badge);
+  } else {
+    snsBtn.style.position = "";
+  }
+}
+window.updateSNSNavBadge = updateSNSNavBadge;
+
+async function sendTestSNSNotification() {
+  const targetEmail = (AppState && AppState.user && AppState.user.email) ? AppState.user.email : "demo@awssecurity.io";
+  showToast(`Testing Amazon SNS publish to ${targetEmail}...`, "info");
+  try {
+    const res = await apiFetch("/api/security/test-notification", {
+      method: "POST",
+      body: JSON.stringify({
+        recipient_email: targetEmail,
+        notification_type: "TEST_SECURITY_ALERT",
+        message: "Diagnostic probe: Amazon SNS and Email dispatch pipeline is operational."
+      })
+    });
+    if (res.ok) {
+      showToast("✅ Amazon SNS test alert dispatched successfully!", "success");
+      await fetchDispatchedNotifications();
+    } else {
+      showToast("Failed to dispatch test notification.", "error");
+    }
+  } catch (err) {
+    showToast("Error dispatching test notification.", "error");
+  }
+}
+window.sendTestSNSNotification = sendTestSNSNotification;
+
+// Clear All Dispatched Security Notifications & Recovery Tokens
+async function clearDispatchedNotifications() {
+  if (!confirm("Are you sure you want to clear all dispatched security emails and recovery tokens from this inbox?")) return;
+  try {
+    const res = await apiFetch("/api/security/dispatched-notifications/clear", { method: "POST" });
+    if (res.ok) {
+      showToast("Dispatched notification mailbox cleared.", "info");
+      cachedDispatchedNotifications = [];
+      await fetchDispatchedNotifications();
+    } else {
+      showToast("Failed to clear notifications.", "error");
+    }
+  } catch (err) {
+    showToast("Error clearing notifications.", "error");
+  }
+}
+window.clearDispatchedNotifications = clearDispatchedNotifications;
+
+
+

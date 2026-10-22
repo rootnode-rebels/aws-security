@@ -58,6 +58,13 @@ function playSecurityAlertSound() {
   }
 }
 
+function toggleMobileMenu() {
+  const nav = document.querySelector(".nav-links");
+  if (nav) {
+    nav.classList.toggle("mobile-open");
+  }
+}
+
 // Global Alert Banner Controller
 function showSecurityAlertBanner(alert) {
   const banner = document.getElementById("emergency-alert-banner");
@@ -161,6 +168,11 @@ async function apiFetch(endpoint, options = {}) {
     }
 
     const data = await res.json().catch(() => ({}));
+    
+    if (res.status === 500) {
+      showToast("Internal Server Error (500). Please try again later.", "error");
+    }
+    
     return { ok: res.ok, status: res.status, data };
   } catch (err) {
     if (!navigator.onLine) {
@@ -172,14 +184,35 @@ async function apiFetch(endpoint, options = {}) {
 
 // Router & Tab Switching
 function switchTab(tabId) {
+  if (!tabId || tabId === "undefined" || tabId === "null") {
+    tabId = "user-portal";
+  }
+
+  // Super Admin Route Protection: CMS dashboard only accessible to Super Admin logins
+  if (tabId === "cms-dashboard" && typeof isSuperAdmin === "function" && !isSuperAdmin(AppState.user)) {
+    showToast("Access Restricted: Super Admin privileges required.", "error");
+    if (AppState.currentTab !== "user-portal") {
+      switchTab("user-portal");
+    }
+    return;
+  }
+
   AppState.currentTab = tabId;
   document.querySelectorAll(".nav-btn").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.tab === tabId);
   });
+  let viewFound = false;
   document.querySelectorAll(".tab-view").forEach(view => {
     const isTarget = view.id === tabId || view.id === `view-${tabId}` || (tabId === "user-portal" && view.id === "view-user-portal");
+    if (isTarget) viewFound = true;
     view.classList.toggle("active", isTarget);
   });
+  
+  if (!viewFound) {
+    document.querySelectorAll(".tab-view").forEach(v => v.classList.remove("active"));
+    const view404 = document.getElementById("view-404");
+    if (view404) view404.classList.add("active");
+  }
 
   // Trigger sub-view initializations
   if (tabId === "attack-studio" && typeof initAttackSimulator === "function") {
@@ -222,8 +255,7 @@ function showToast(message, type = "info") {
   container.appendChild(toast);
 
   setTimeout(() => {
-    toast.style.opacity = "0";
-    toast.style.transform = "translateX(50px)";
+    toast.classList.add("toast-out");
     setTimeout(() => toast.remove(), 300);
   }, 4000);
 }
@@ -251,6 +283,99 @@ function closeModal(modalId) {
   }
 }
 window.closeModal = closeModal;
+
+// Universal HTML Escaper for Security & Safe Rendering
+function escapeHtml(str) {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+window.escapeHtml = escapeHtml;
+
+// Global Controller for Amazon SNS & Dispatched Security Mailbox Modal
+// Note: Full implementation is in user_portal.js (openDispatchedMailbox / fetchDispatchedNotifications)
+// This stub ensures the function is always available globally, even before user_portal.js loads.
+if (typeof window.openDispatchedMailbox === "undefined") {
+  window.openDispatchedMailbox = function() {
+    openModal("modal-dispatched-notifications");
+    if (typeof window.fetchDispatchedNotifications === "function") {
+      window.fetchDispatchedNotifications();
+    }
+  };
+}
+
+// Central Password Modal Controller
+function switchPasswordMode(mode) {
+  const formAuth = document.getElementById("form-change-password-auth");
+  const formToken = document.getElementById("form-reset-password-token");
+  const btnAuth = document.getElementById("tab-pw-auth");
+  const btnToken = document.getElementById("tab-pw-token");
+
+  if (mode === "auth") {
+    if (formAuth) formAuth.style.display = "block";
+    if (formToken) formToken.style.display = "none";
+    if (btnAuth) btnAuth.classList.add("active");
+    if (btnToken) btnToken.classList.remove("active");
+  } else {
+    if (formAuth) formAuth.style.display = "none";
+    if (formToken) formToken.style.display = "block";
+    if (btnAuth) btnAuth.classList.remove("active");
+    if (btnToken) btnToken.classList.add("active");
+  }
+}
+window.switchPasswordMode = switchPasswordMode;
+
+function openPasswordModal(preferredMode) {
+  const isAuth = !!(AppState && AppState.user && AppState.token);
+  const mode = preferredMode || (isAuth ? "auth" : "token");
+  switchPasswordMode(mode);
+  openModal("modal-reset-password");
+}
+window.openPasswordModal = openPasswordModal;
+
+async function handleChangePasswordAuth(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const currentPassword = document.getElementById("change-curr-password")?.value || "";
+  const newPassword = document.getElementById("change-new-password")?.value || "";
+
+  if (!currentPassword) {
+    showToast("Please enter your current master password.", "warning");
+    return;
+  }
+  if (!newPassword || newPassword.length < 8) {
+    showToast("New password must be at least 8 characters with mixed cases & numbers.", "warning");
+    return;
+  }
+
+  if (!AppState.token) {
+    showToast("Please sign in or use the Single-Use Token tab.", "warning");
+    switchPasswordMode("token");
+    return;
+  }
+
+  showToast("Updating master credentials...", "info");
+  const res = await apiFetch("/api/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+  });
+
+  if (res.ok) {
+    closeModal("modal-reset-password");
+    const currInput = document.getElementById("change-curr-password");
+    const newInput = document.getElementById("change-new-password");
+    if (currInput) currInput.value = "";
+    if (newInput) newInput.value = "";
+    showToast("Master password successfully updated! Remote sessions revoked.", "success");
+  } else {
+    const errorMsg = res.data?.detail || res.error || "Failed to update password. Check your current password.";
+    showToast(errorMsg, "error");
+  }
+}
+window.handleChangePasswordAuth = handleChangePasswordAuth;
 
 // Global Escape Key Listener for Modals
 document.addEventListener("keydown", (e) => {
@@ -432,8 +557,18 @@ window.syncSystemStatus = syncSystemStatus;
 
 // App Initialization
 document.addEventListener("DOMContentLoaded", async () => {
-  // Navigation clicks (attached immediately for zero delay)
-  document.querySelectorAll(".nav-btn").forEach(btn => {
+  // Initialize light/dark theme preference
+  if (typeof initTheme === "function") {
+    initTheme();
+  }
+
+  // Initialize Auth UI state (hide logout & admin by default)
+  if (typeof updateAuthUI === "function") {
+    updateAuthUI();
+  }
+
+  // Navigation clicks (attached only to tab navigation buttons with data-tab)
+  document.querySelectorAll(".nav-btn[data-tab]").forEach(btn => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
 
@@ -468,3 +603,308 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }, 2500);
 });
+
+// ============================================================================
+// SUPER ADMIN & PRIVILEGE CONFIGURATION
+// Add Super Admin emails and roles below:
+// ============================================================================
+const SUPER_ADMIN_CONFIG = {
+  // Super Admin email list (case-insensitive)
+  emails: [
+    "superadmin@awssecurity.io",
+    ...(JSON.parse(localStorage.getItem("super_admin_emails") || "[]"))
+  ],
+  roles: ["SUPER_ADMIN"],
+  passwords: [] // Kept confidential under admin
+};
+window.SUPER_ADMIN_CONFIG = SUPER_ADMIN_CONFIG;
+
+function isSuperAdmin(user = AppState.user) {
+  if (!user) return false;
+  // Check explicit super admin flag
+  if (user.is_super_admin === true) return true;
+  const userEmail = (user.email || "").toLowerCase().trim();
+  if (userEmail && SUPER_ADMIN_CONFIG.emails.some(e => e.toLowerCase().trim() === userEmail)) {
+    return true;
+  }
+  if (user.role && SUPER_ADMIN_CONFIG.roles.includes(String(user.role).toUpperCase().trim())) {
+    return true;
+  }
+  return false;
+}
+window.isSuperAdmin = isSuperAdmin;
+
+// Helper to easily register/change super admin email at runtime or from console:
+window.setSuperAdminEmail = function(email) {
+  if (!email) return;
+  const trimmed = email.toLowerCase().trim();
+  if (!SUPER_ADMIN_CONFIG.emails.includes(trimmed)) {
+    SUPER_ADMIN_CONFIG.emails.push(trimmed);
+  }
+  const saved = JSON.parse(localStorage.getItem("super_admin_emails") || "[]");
+  if (!saved.includes(trimmed)) {
+    saved.push(trimmed);
+    localStorage.setItem("super_admin_emails", JSON.stringify(saved));
+  }
+  updateAuthUI();
+  console.log(`[SuperAdmin] Registered super admin email: ${trimmed}`);
+  showToast(`Super Admin email registered: ${trimmed}`, "success");
+};
+
+// Central Auth UI updater for Logout button, Admin privileges, and Login vs App Navbar visibility
+function updateAuthUI() {
+  const isLoggedIn = !!(AppState.token && AppState.user);
+  const isSuper = isSuperAdmin(AppState.user);
+
+  // 1. Main Navigation Tabs (Portal, Simulator, Blue Team, etc.): ONLY show when logged in
+  const mainNav = document.getElementById("main-nav-container") || document.querySelector("nav[aria-label='Main Navigation']");
+  if (mainNav) {
+    mainNav.style.display = isLoggedIn ? "block" : "none";
+  }
+
+  // 2. Mobile Menu Toggle: ONLY show when logged in
+  const mobileMenuBtn = document.querySelector(".mobile-menu-btn");
+  if (mobileMenuBtn) {
+    mobileMenuBtn.style.display = isLoggedIn ? "block" : "none";
+  }
+
+  // 3. Status Beacon (LIVE: 2s) & SNS Inbox: ONLY show when logged in
+  const liveSync = document.getElementById("nav-live-sync") || document.querySelector(".live-sync-beacon");
+  if (liveSync) {
+    liveSync.style.display = isLoggedIn ? "inline-flex" : "none";
+  }
+  const navSnsBtn = document.getElementById("btn-nav-sns");
+  if (navSnsBtn) {
+    navSnsBtn.style.display = isLoggedIn ? "inline-flex" : "none";
+  }
+
+  // 4. Sound, Practice, and Help remain cleanly visible on the login screen
+  // (btn-sound-toggle, nav-practice-btn, nav-help-btn)
+
+  // 5. Logout button: ONLY show when user logs in
+  const navLogoutItem = document.getElementById("nav-item-logout");
+  const navLogoutBtn = document.getElementById("btn-prominent-logout");
+  if (navLogoutItem) {
+    navLogoutItem.style.display = isLoggedIn ? "inline-flex" : "none";
+  }
+  if (navLogoutBtn) {
+    navLogoutBtn.style.display = isLoggedIn ? "inline-flex" : "none";
+  }
+
+  // 6. Admin Privileges / CMS tab: ONLY show for Super Admin
+  const navCmsItem = document.getElementById("nav-item-cms");
+  const navCmsBtn = document.querySelector('[data-tab="cms-dashboard"]');
+  if (navCmsItem) {
+    navCmsItem.style.display = isSuper ? "inline-flex" : "none";
+  }
+  if (navCmsBtn && navCmsBtn.parentElement && navCmsBtn.parentElement !== navCmsItem) {
+    navCmsBtn.parentElement.style.display = isSuper ? "inline-flex" : "none";
+  }
+
+  // Maintenance mode admin overrides
+  const bannerAdminBtn = document.getElementById("btn-banner-disable-maint");
+  const modalAdminBtn = document.getElementById("btn-modal-maint-admin-unlock");
+  if (bannerAdminBtn) bannerAdminBtn.style.display = (isSuper && lastMaintenanceState) ? "inline-flex" : "none";
+  if (modalAdminBtn) modalAdminBtn.style.display = (isSuper && lastMaintenanceState) ? "inline-flex" : "none";
+
+  // If user is currently on CMS tab without super admin rights, redirect to portal
+  if (AppState.currentTab === "cms-dashboard" && !isSuper) {
+    switchTab("user-portal");
+  }
+}
+window.updateAuthUI = updateAuthUI;
+window.checkAdminUI = updateAuthUI;
+
+// ============================================================================
+// UI ENHANCEMENTS (Theme, Mobile, Accessibility, Shortcuts)
+// ============================================================================
+
+function applyTheme(theme) {
+  const isLight = (theme === "light");
+  const html = document.documentElement;
+  const body = document.body;
+
+  if (isLight) {
+    html.setAttribute("data-theme", "light");
+    if (body) {
+      body.setAttribute("data-theme", "light");
+      body.classList.remove("theme-dark");
+      body.classList.add("theme-light");
+    }
+  } else {
+    html.removeAttribute("data-theme");
+    if (body) {
+      body.removeAttribute("data-theme");
+      body.classList.remove("theme-light");
+      body.classList.add("theme-dark");
+    }
+  }
+
+  // Update theme button icon & label
+  const themeIcon = document.getElementById("theme-icon");
+  const themeLabel = document.getElementById("theme-label");
+  const themeBtn = document.getElementById("btn-theme-toggle");
+  if (themeIcon) themeIcon.textContent = isLight ? "☀️" : "🌙";
+  if (themeLabel) themeLabel.textContent = isLight ? "Light" : "Dark";
+  if (themeBtn) themeBtn.title = isLight ? "Switch to Dark Mode" : "Switch to Light Mode";
+
+  localStorage.setItem("theme", isLight ? "light" : "dark");
+}
+window.applyTheme = applyTheme;
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-theme") || (document.body && document.body.getAttribute("data-theme")) || (document.body && document.body.classList.contains("theme-light") ? "light" : "dark");
+  const nextTheme = (current === "light") ? "dark" : "light";
+  applyTheme(nextTheme);
+  showToast(`Theme changed to ${nextTheme === "light" ? "Light" : "Dark"} Mode`, "info");
+}
+window.toggleTheme = toggleTheme;
+
+function initTheme() {
+  const saved = localStorage.getItem("theme");
+  if (saved) {
+    applyTheme(saved);
+  } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
+    applyTheme("light");
+  } else {
+    applyTheme("dark");
+  }
+}
+window.initTheme = initTheme;
+// Immediately execute theme initialization to prevent flash
+initTheme();
+
+// Global Keyboard Shortcuts
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    document.querySelectorAll(".cyber-modal-overlay.active").forEach(m => m.classList.remove("active"));
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+    e.preventDefault();
+    showToast("Global Search feature coming soon...", "info");
+  }
+});
+
+// Scroll listener for back-to-top
+window.addEventListener("scroll", () => {
+  const btn = document.getElementById("back-to-top");
+  if (btn) {
+    if (window.scrollY > 300) btn.style.display = "flex";
+    else btn.style.display = "none";
+  }
+});
+
+// Initialize features on load
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(() => {
+    if (!localStorage.getItem("cookies_accepted")) {
+      const banner = document.getElementById("cookie-banner");
+      if (banner) banner.classList.add("visible");
+    }
+  }, 1000);
+  
+  setupPasswordToggles();
+});
+
+// Cookie banner dismissal
+function acceptCookies() {
+  try {
+    localStorage.setItem("cookies_accepted", "true");
+  } catch (e) {
+    console.warn("Storage access issue:", e);
+  }
+  const banner = document.getElementById("cookie-banner");
+  if (banner) {
+    banner.classList.remove("visible");
+    banner.style.display = "none";
+  }
+}
+window.acceptCookies = acceptCookies;
+
+
+// ============================================================================
+// COPY TO CLIPBOARD HELPER
+// ============================================================================
+function copyToClipboard(text, btnElement) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(() => {
+      const originalText = btnElement.innerHTML;
+      btnElement.innerHTML = "✅ Copied!";
+      setTimeout(() => btnElement.innerHTML = originalText, 2000);
+    }).catch(err => {
+      console.error("Failed to copy:", err);
+      showToast("Failed to copy to clipboard", "error");
+    });
+  } else {
+    // Fallback
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+      document.execCommand("copy");
+      const originalText = btnElement.innerHTML;
+      btnElement.innerHTML = "✅ Copied!";
+      setTimeout(() => btnElement.innerHTML = originalText, 2000);
+    } catch (err) {
+      showToast("Failed to copy to clipboard", "error");
+    }
+    document.body.removeChild(textArea);
+  }
+}
+
+
+// ============================================================================
+// SKELETON LOADERS & EMPTY STATES HELPER
+// ============================================================================
+function renderSkeletonRows(containerId, count=3) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  let html = "";
+  for(let i=0; i<count; i++){
+    html += `<tr style="background:transparent;"><td colspan="10"><div class="skeleton" style="height:40px; width:100%;"></div></td></tr>`;
+  }
+  container.innerHTML = html;
+}
+
+function renderEmptyState(containerId, message) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = `
+    <tr><td colspan="10">
+      <div style="padding: 2rem; text-align: center; color: var(--text-dim);">
+        <span class="material-symbols-outlined" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;">inventory_2</span>
+        <div>${message}</div>
+      </div>
+    </td></tr>
+  `;
+}
+
+
+// ============================================================================
+// EMAIL VERIFICATION FLOW
+// ============================================================================
+async function submitEmailVerification(e) {
+  e.preventDefault();
+  const code = document.getElementById("verify-code-input").value;
+  const email = document.getElementById("verify-email-hidden").value;
+  
+  if (!code || !email) return;
+  
+  showToast("Verifying email...", "info");
+  const res = await apiFetch("/api/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ email: email, code: code })
+  });
+  
+  if (res.ok) {
+    showToast(res.data.message, "success");
+    closeModal("modal-email-verification");
+    document.getElementById("form-email-verify").reset();
+    // Re-render user portal or switch to login
+    switchTab("user-portal");
+  } else {
+    showToast(res.data?.detail || "Invalid verification code.", "error");
+  }
+}
+
