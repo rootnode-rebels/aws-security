@@ -38,7 +38,7 @@ def load_env_file():
                         k, v = line.split("=", 1)
                         k = k.strip()
                         v = v.strip().strip("\"'")
-                        if k:
+                        if k and k not in os.environ:
                             os.environ[k] = v
                 break
             except Exception as e:
@@ -144,7 +144,17 @@ class NotificationDispatcher:
         try:
             import boto3
             session = boto3.Session()
-            self._boto3_sns_client = session.client("sns", region_name=os.getenv("AWS_REGION", "us-east-1"))
+            
+            # Dynamically extract region from ARN (arn:aws:sns:eu-central-1:...)
+            region = os.getenv("AWS_REGION")
+            if not region and self.sns_topic_arn:
+                parts = self.sns_topic_arn.split(":")
+                if len(parts) >= 4:
+                    region = parts[3]
+            if not region:
+                region = "us-east-1"
+                
+            self._boto3_sns_client = session.client("sns", region_name=region)
             return self._boto3_sns_client
         except Exception as e:
             logger.debug(f"[NotificationDispatcher] Boto3 SNS unavailable: {e}")
@@ -167,10 +177,66 @@ class NotificationDispatcher:
             logger.debug(f"[NotificationDispatcher] Boto3 SES unavailable: {e}")
             return None
 
-    def _publish_sns(self, recipient_email: str, subject: str, message: str, notification_type: str) -> bool:
-        """Publishes security alert to Amazon SNS Topic with message attributes."""
+    def subscribe_email_to_sns(self, email: str) -> bool:
+        """Automatically subscribes a user's email address to the configured Amazon SNS Topic with a RecipientEmail filter policy."""
         client = self._get_sns_client()
         if not client or not self.sns_topic_arn:
+            return False
+            
+        clean_email = email.strip().lower()
+        try:
+            # Set SNS Subscription Filter Policy so AWS only routes messages intended for this specific email
+            filter_policy = {
+                "RecipientEmail": [clean_email]
+            }
+            client.subscribe(
+                TopicArn=self.sns_topic_arn,
+                Protocol='email',
+                Endpoint=clean_email,
+                ReturnSubscriptionArn=True,
+                Attributes={
+                    'FilterPolicy': json.dumps(filter_policy)
+                }
+            )
+            logger.info(f"[NotificationDispatcher] Successfully triggered SNS email subscription with FilterPolicy for {clean_email}")
+            return True
+        except Exception as e:
+            try:
+                client.subscribe(
+                    TopicArn=self.sns_topic_arn,
+                    Protocol='email',
+                    Endpoint=clean_email,
+                    ReturnSubscriptionArn=True
+                )
+                logger.info(f"[NotificationDispatcher] Subscribed without FilterPolicy fallback for {clean_email}")
+                return True
+            except Exception as e2:
+                logger.warning(f"[NotificationDispatcher] AWS SNS subscription failed for {clean_email}: {e2}")
+                return False
+
+    def _publish_sns(self, recipient_email: str, subject: str, message: str, notification_type: str) -> bool:
+        """Publishes security alert to Amazon SNS Topic with message attributes and privacy isolation."""
+        client = self._get_sns_client()
+        if not client or not self.sns_topic_arn:
+            return False
+
+        # 1. Suppress synthetic test emails from publishing to real external AWS SNS
+        clean_email = (recipient_email or "").strip().lower()
+        if clean_email.endswith("@awssecurity.io") or clean_email.endswith("@example.com") or clean_email.startswith(("test_", "dummy_", "tester_")):
+            return False
+
+        # 2. PRIVACY PROTECTION:
+        # Single-user private credentials (MFA OTPs, password reset tokens, email verification codes)
+        # must NOT be broadcast to a shared SNS topic where other topic subscribers can read them!
+        # Private secrets are delivered directly via Amazon SES / SMTP / In-App Mailbox.
+        PRIVATE_CREDENTIAL_TYPES = {
+            "MFA_VERIFICATION_CODE",
+            "PASSWORD_RESET_TOKEN",
+            "EMAIL_VERIFICATION",
+            "SECONDARY_PASSWORD_ROTATED"
+        }
+        enable_shared_otp = os.getenv("ENABLE_SNS_SHARED_OTP_BROADCAST", "false").lower() == "true"
+        if notification_type in PRIVATE_CREDENTIAL_TYPES and not enable_shared_otp:
             return False
 
         try:
@@ -179,7 +245,7 @@ class NotificationDispatcher:
                 Subject=subject[:100],
                 Message=message,
                 MessageAttributes={
-                    "RecipientEmail": {"DataType": "String", "StringValue": recipient_email},
+                    "RecipientEmail": {"DataType": "String", "StringValue": clean_email},
                     "NotificationType": {"DataType": "String", "StringValue": notification_type}
                 }
             )
@@ -193,6 +259,13 @@ class NotificationDispatcher:
         if not self.smtp_host:
             return False, "SMTP not configured"
 
+        # If a remote SMTP server is configured (e.g. Google Gmail) but credentials are missing,
+        # avoid attempting unauthenticated connections which will fail and hold open idle sockets.
+        is_localhost = self.smtp_host.lower() in ("localhost", "127.0.0.1", "::1")
+        if not is_localhost and (not self.smtp_user or not self.smtp_password):
+            return False, f"SMTP authentication credentials not configured for remote host {self.smtp_host}"
+
+        server = None
         try:
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
@@ -221,12 +294,20 @@ class NotificationDispatcher:
                 server.login(self.smtp_user, self.smtp_password)
 
             server.sendmail(self.from_email, [recipient_email], msg.as_string())
-            server.quit()
             logger.info(f"[NotificationDispatcher] SMTP delivered successfully to {recipient_email}")
             return True, None
         except Exception as e:
             logger.warning(f"[NotificationDispatcher] SMTP delivery to {recipient_email} failed: {e}")
             return False, str(e)
+        finally:
+            if server is not None:
+                try:
+                    server.quit()
+                except Exception:
+                    try:
+                        server.close()
+                    except Exception:
+                        pass
 
     def dispatch(
         self,
@@ -263,7 +344,7 @@ class NotificationDispatcher:
             last_sent = self._alert_cooldowns.get(cooldown_key, 0)
             now_ts = time.time()
             cooldown_window = int(os.getenv("NOTIFICATION_COOLDOWN_SECONDS", "300"))
-            is_in_cooldown = (now_ts - last_sent < cooldown_window) and (os.getenv("DEPLOYMENT_MODE", "").upper() not in ("TEST", "DEVELOPMENT"))
+            is_in_cooldown = (now_ts - last_sent < cooldown_window) and (os.getenv("DEPLOYMENT_MODE", "").upper() not in ("TEST", "DEVELOPMENT", "DEMO", "STANDALONE_LOCAL", "LOCAL", "")) and notification_type not in ("MFA_VERIFICATION_CODE", "PASSWORD_RESET_TOKEN")
 
             if is_in_cooldown:
                 meta["cooldown_applied"] = True
@@ -725,6 +806,17 @@ class NotificationDispatcher:
             body_html=body_html,
             notification_type="EMAIL_VERIFICATION",
             metadata={"code": code}
+        )
+
+    def send_security_alert(self, email: str, title: str, message: str, risk_score: float = 0.0) -> Dict[str, Any]:
+        """Dispatches an alert for 2FA activation/deactivation or recovery access."""
+        subject = f"🛡️ [AWS Security] {title}"
+        return self.dispatch(
+            recipient_email=email,
+            subject=subject,
+            body_text=message,
+            notification_type="ACCOUNT_STATUS_CHANGE",
+            metadata={"title": title, "risk_score": risk_score}
         )
 
 # Global singleton dispatcher instance

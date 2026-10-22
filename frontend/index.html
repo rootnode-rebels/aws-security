@@ -10,6 +10,8 @@
   <title>AWSSecurity | Real-Time Account Hijacking Detection & Prevention</title>
   <meta name="description" content="Cloud-native AWS serverless and Machine Learning cybersecurity platform detecting and preventing account hijacking in real time.">
   <meta name="theme-color" content="#090a0d">
+  <link rel="icon" type="image/png" href="/static/favicon.png">
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
   
   <!-- Google Fonts: Inter, Plus Jakarta Sans, JetBrains Mono, Outfit & Material Symbols Outlined -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -274,9 +276,13 @@
               <span>Sign In</span>
             </button>
 
-            <div style="margin-top: 0.85rem; text-align: center;">
-              <button type="button" class="btn btn-secondary btn-sm" onclick="openDispatchedMailbox()" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 0.45rem; padding: 0.55rem; font-size: 0.8rem; border-color: rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.08); color: #bae6fd;" title="Open simulated Amazon SNS & Email inbox, password recovery tokens, and security alerts">
-                <span>📧 View Dispatched Amazon SNS Alerts</span>
+            <div style="margin-top: 0.85rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="openDispatchedMailbox()" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 0.45rem; padding: 0.55rem; font-size: 0.8rem; border-color: rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.08); color: #bae6fd;" title="Open simulated Amazon SNS & Email inbox, password recovery tokens, and security alerts">
+                <span>📧 View SNS Alerts</span>
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="quickResetDatabase()" style="display: flex; align-items: center; justify-content: center; gap: 0.35rem; padding: 0.55rem 0.75rem; font-size: 0.8rem; border-color: rgba(245, 158, 11, 0.35); background: rgba(245, 158, 11, 0.08); color: #fde68a;" title="Reconnect DB and purge dead sessions if experiencing idle freeze">
+                <span class="material-symbols-outlined" style="font-size: 0.9rem;">restart_alt</span>
+                <span>Reset DB</span>
               </button>
             </div>
           </form>
@@ -362,6 +368,10 @@
                 <span class="meta-separator">•</span>
                 <span id="btn-desktop-notif-status" class="hud-inline-chip meta-chip-interactive" onclick="toggleDesktopNotifications()" title="Desktop system notifications status">
                   <span class="pulse-dot pulse-dot-cyan"></span>DESKTOP ALERTS: ACTIVE
+                </span>
+                <span class="meta-separator">•</span>
+                <span id="user-totp-badge" class="hud-inline-chip meta-chip-interactive" onclick="handleTOTPToggleClick()" title="Authenticator App 2FA status and settings">
+                  <span class="pulse-dot pulse-dot-silver" id="user-totp-dot"></span><span id="user-totp-label">2FA: OFF</span>
                 </span>
               </div>
             </div>
@@ -760,6 +770,21 @@
                     <input type="checkbox" checked onchange="showToast('Extra verification is enabled.', 'info')">
                     <span class="slider round"></span>
                   </label>
+                </div>
+
+                <div class="defense-control-item" style="border-top: 1px solid rgba(255,255,255,0.06); padding-top: 0.75rem; margin-top: 0.25rem;">
+                  <div>
+                    <div class="control-name" style="display: flex; align-items: center; gap: 0.4rem;">
+                      <span>Authenticator App (2FA)</span>
+                      <span id="totp-status-pill" class="capsule-badge capsule-silver" style="font-size: 0.7rem;">OFF</span>
+                    </div>
+                    <div class="control-meta" id="totp-status-desc" style="color: var(--text-muted);">
+                      Google / Microsoft / Apple Authenticator for instant recovery
+                    </div>
+                  </div>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-totp-toggle" onclick="handleTOTPToggleClick()" style="font-size: 0.75rem; padding: 0.35rem 0.65rem;">
+                    ⚙️ Setup 2FA
+                  </button>
                 </div>
               </div>
             </div>
@@ -1266,10 +1291,19 @@
             Identity directory, active token metrics, maintenance mode state, and platform administrative controls.
           </p>
         </div>
-        <button class="btn btn-secondary btn-sm" onclick="cmsLoadData()" title="Refresh CMS Telemetry">
-          <span class="material-symbols-outlined" style="font-size: 0.95rem;">refresh</span>
-          <span>Refresh CMS</span>
-        </button>
+        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+          <span id="cms-db-health-badge" class="capsule-badge capsule-emerald font-mono" style="font-size: 0.72rem;" title="Live database link status">
+            <span class="pulse-dot pulse-dot-emerald"></span>DB: CONNECTED
+          </span>
+          <button id="cms-btn-reset-db" class="btn btn-warning btn-sm glow-amber" onclick="cmsResetDatabase()" title="Reconnect DB socket pool, purge expired sessions, and restore pristine state" style="display: inline-flex; align-items: center; gap: 0.35rem;">
+            <span class="material-symbols-outlined" style="font-size: 0.95rem;">restart_alt</span>
+            <span>Reset & Reconnect DB</span>
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="cmsLoadData()" title="Refresh CMS Telemetry" style="display: inline-flex; align-items: center; gap: 0.35rem;">
+            <span class="material-symbols-outlined" style="font-size: 0.95rem;">refresh</span>
+            <span>Refresh CMS</span>
+          </button>
+        </div>
       </div>
 
       <!-- CMS Metric Cards -->
@@ -1355,6 +1389,32 @@
           </table>
         </div>
       </div>
+
+      <!-- God Mode Approvals Panel (Only visible to ROOT_OWNER) -->
+      <div id="godmode-approvals-panel" class="cyber-card" style="margin-top: 1.5rem; display: none; border: 1px solid rgba(245, 158, 11, 0.3);">
+        <div class="card-header" style="border-bottom-color: rgba(245, 158, 11, 0.2);">
+          <div class="card-title" style="color: var(--accent-amber);">
+            <span style="font-size: 1.3rem;">👑</span>
+            <span>God Mode Approval Queue</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span id="godmode-pending-count" class="badge badge-medium font-mono" style="color: var(--accent-amber); border-color: rgba(245, 158, 11, 0.4);">0 Pending</span>
+            <button class="btn btn-secondary btn-sm" onclick="godmodeLoadApprovals()" title="Refresh pending approvals">
+              <span class="material-symbols-outlined" style="font-size: 1rem;">refresh</span>
+              <span>Refresh</span>
+            </button>
+          </div>
+        </div>
+        <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
+          Super Admin requests that require your explicit authorization before execution. Review each request carefully before approving or rejecting.
+        </p>
+        <div id="godmode-approvals-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
+          <div style="text-align: center; color: var(--text-muted); padding: 2rem 0; font-size: 0.85rem;">
+            No pending approval requests.
+          </div>
+        </div>
+      </div>
+
     </section>
 
     <!-- VIEW 7: 404 NOT FOUND -->
@@ -1410,6 +1470,179 @@
           </button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Modal: Adaptive TOTP Authenticator Recovery -->
+  <div id="modal-totp-recovery" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="totp-recovery-title">
+    <div class="cyber-modal-box" style="max-width: 500px; text-align: center;">
+      <button class="modal-close-btn" onclick="closeModal('modal-totp-recovery')" aria-label="Close dialog">✕</button>
+
+      <div style="width: 56px; height: 56px; border-radius: 50%; background: rgba(56, 189, 248, 0.12); display: flex; align-items: center; justify-content: center; margin: 0 auto 0.75rem; color: var(--accent-cyan); border: 1px solid rgba(56, 189, 248, 0.3);">
+        <span class="material-symbols-outlined" style="font-size: 2rem;">verified_user</span>
+      </div>
+
+      <h2 id="totp-recovery-title" style="color: #fff; font-size: 1.25rem; margin-bottom: 0.35rem;">
+        Adaptive Identity Verification
+      </h2>
+      <div style="font-size: 0.76rem; color: var(--accent-amber); font-family: var(--font-mono); margin-bottom: 0.85rem; letter-spacing: 0.05em;">
+        ⚠️ MULTIPLE FAILED ATTEMPTS DETECTED
+      </div>
+
+      <p id="totp-recovery-desc" style="font-size: 0.84rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 1.25rem;">
+        Repeated unsuccessful login attempts were recorded. Enter the <strong>6-digit code</strong> from your Authenticator App (or an 8-character backup code) to restore access.
+      </p>
+
+      <form id="form-totp-recovery" onsubmit="handleVerifyTOTPRecovery(event)">
+        <input type="hidden" id="totp-recovery-email-hidden">
+        <input type="hidden" id="totp-recovery-temp-token-hidden">
+
+        <div class="form-group" style="text-align: center; margin-bottom: 1.25rem;">
+          <label class="form-label" for="totp-recovery-code-input" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); margin-bottom: 0.5rem;">
+            Authenticator Code or Backup Key
+          </label>
+          <input type="text" id="totp-recovery-code-input" class="form-input" style="font-size: 1.5rem; letter-spacing: 0.25em; text-align: center; font-family: var(--font-mono); font-weight: 700; color: var(--accent-cyan); background: rgba(0,0,0,0.35); padding: 0.65rem;" maxlength="24" required placeholder="123456" autocomplete="one-time-code">
+          <div id="totp-recovery-tries-label" style="font-size: 0.74rem; color: var(--text-muted); margin-top: 0.4rem;">
+            Max 3 recovery verification attempts allowed.
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 0.6rem;">
+          <button type="submit" class="btn btn-primary" style="flex: 1; padding: 0.7rem;">
+            🔓 Verify & Restore Account Access
+          </button>
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-totp-recovery')">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Setup Authenticator App 2FA -->
+  <div id="modal-totp-setup" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="totp-setup-title">
+    <div class="cyber-modal-box" style="max-width: 620px; max-height: 90vh; overflow-y: auto;">
+      <button class="modal-close-btn" onclick="closeModal('modal-totp-setup')" aria-label="Close dialog">✕</button>
+      
+      <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.4rem;">
+        <span class="material-symbols-outlined" style="font-size: 1.8rem; color: var(--accent-cyan);">shield_lock</span>
+        <div>
+          <h2 id="totp-setup-title" style="color: #fff; font-size: 1.25rem; margin: 0;">
+            Setup Authenticator App (2FA)
+          </h2>
+          <div style="font-size: 0.75rem; color: var(--accent-cyan); font-family: var(--font-mono);">
+            RFC 6238 TOTP • GOOGLE / MICROSOFT / APPLE / AUTHY
+          </div>
+        </div>
+      </div>
+      
+      <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 1rem; line-height: 1.5;">
+        Add an extra layer of defense. If you ever lose or forget your master credentials, you can immediately recover access using your Authenticator App.
+      </p>
+
+      <!-- Step 1: Scan QR or Manual Key -->
+      <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1rem; margin-bottom: 1rem; text-align: center;">
+        <div style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent-cyan); font-weight: 600; margin-bottom: 0.75rem;">
+          Step 1: Scan with Authenticator App
+        </div>
+        <div id="totp-qr-container" style="background: #ffffff; padding: 10px; border-radius: 10px; display: inline-block; margin-bottom: 0.75rem; box-shadow: 0 4px 16px rgba(0,0,0,0.4);">
+          <!-- Pure SVG QR Code injected here -->
+        </div>
+        
+        <div style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 0.4rem;">
+          Or enter this setup key manually into your authenticator app:
+        </div>
+        <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; flex-wrap: wrap;">
+          <code id="totp-secret-key-display" style="background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; padding: 0.35rem 0.75rem; font-family: var(--font-mono); font-size: 0.9rem; color: #38bdf8; letter-spacing: 0.1em; user-select: all;">
+            --------
+          </code>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="copyTOTPSecret()" title="Copy setup secret key">
+            📋 Copy Key
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 2: Emergency Backup Codes -->
+      <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1rem; margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.4rem;">
+          <div style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent-amber); font-weight: 600;">
+            Step 2: Save Emergency Backup Codes
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="copyTOTPBackupCodes()" style="font-size: 0.72rem; padding: 0.2rem 0.5rem;">
+            📋 Copy All Codes
+          </button>
+        </div>
+        <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.6rem; line-height: 1.4;">
+          If you lose access to your phone or authenticator app, each single-use backup code can unlock your account once.
+        </p>
+        <div id="totp-backup-codes-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; font-family: var(--font-mono); font-size: 0.8rem; text-align: center;">
+          <!-- 8 backup codes injected dynamically -->
+        </div>
+      </div>
+
+      <!-- Step 3: Confirm 6-digit code -->
+      <form id="form-totp-setup-verify" onsubmit="handleTOTPSetupVerify(event)">
+        <input type="hidden" id="totp-setup-token-hidden">
+        
+        <div style="background: rgba(56, 189, 248, 0.05); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 10px; padding: 1rem; margin-bottom: 1.2rem; text-align: center;">
+          <div style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent-cyan); font-weight: 600; margin-bottom: 0.4rem;">
+            Step 3: Enter 6-Digit Code from App
+          </div>
+          <p style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+            Enter the current 6-digit code displayed in Google Authenticator or your app to confirm activation:
+          </p>
+          <input type="text" id="totp-setup-code-input" class="form-input" maxlength="6" pattern="[0-9]{6}" required autocomplete="one-time-code" placeholder="123456" style="max-width: 200px; margin: 0 auto; text-align: center; font-size: 1.5rem; letter-spacing: 0.3em; font-family: var(--font-mono); font-weight: 700; color: #38bdf8;">
+        </div>
+
+        <div style="display: flex; gap: 0.6rem;">
+          <button type="submit" class="btn btn-primary" style="flex: 1; padding: 0.7rem;">
+            🛡️ Verify Code & Activate 2FA
+          </button>
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-totp-setup')">
+            Cancel
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Manage / Disable Authenticator 2FA -->
+  <div id="modal-totp-manage" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="totp-manage-title">
+    <div class="cyber-modal-box" style="max-width: 480px;">
+      <button class="modal-close-btn" onclick="closeModal('modal-totp-manage')" aria-label="Close dialog">✕</button>
+      
+      <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.4rem;">
+        <span class="material-symbols-outlined" style="font-size: 1.6rem; color: var(--accent-emerald);">verified</span>
+        <h2 id="totp-manage-title" style="color: #fff; font-size: 1.2rem; margin: 0;">
+          Authenticator 2FA Active
+        </h2>
+      </div>
+      
+      <p style="font-size: 0.83rem; color: var(--text-muted); margin-bottom: 1rem; line-height: 1.5;">
+        Two-Factor Authentication is currently active on your account. If you lose your master credentials, you can recover access anytime via Google Authenticator, Microsoft Authenticator, or Apple Keychain.
+      </p>
+
+      <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 0.85rem; margin-bottom: 1.2rem; font-size: 0.8rem; color: #a7f3d0;">
+        <div>🛡️ <strong>Protection Status:</strong> Active & Monitored</div>
+        <div style="margin-top: 0.3rem;">🔑 <strong>Unused Emergency Backup Codes:</strong> <span id="totp-manage-backup-count" style="font-family: var(--font-mono); font-weight: 700; color: #fff;">Checking...</span></div>
+      </div>
+
+      <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 1rem;">
+        <div style="font-size: 0.82rem; font-weight: 600; color: var(--accent-crimson); margin-bottom: 0.3rem;">
+          Deactivate Authenticator 2FA
+        </div>
+        <p style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+          Enter your current master password to turn off Two-Factor Authentication.
+        </p>
+        <form onsubmit="handleTOTPDisable(event)">
+          <div class="form-group">
+            <input type="password" id="totp-disable-password" class="form-input" required placeholder="Enter master password to confirm">
+          </div>
+          <button type="submit" class="btn btn-danger btn-sm" style="width: 100%;">
+            Turn Off Authenticator 2FA
+          </button>
+        </form>
+      </div>
     </div>
   </div>
 
@@ -1814,14 +2047,20 @@
   <!-- Modal: Emergency Locked UX State -->
   <div id="modal-account-locked" class="cyber-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="locked-title">
     <div class="cyber-modal-box" style="text-align: center;">
+      <button class="modal-close-btn" onclick="closeModal('modal-account-locked')" aria-label="Close dialog">✕</button>
       <div style="font-size: 3rem; margin-bottom: 0.5rem;">🔒</div>
       <h2 id="locked-title" style="color: var(--accent-crimson); margin-bottom: 0.5rem;">Signed Out Everywhere</h2>
       <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem;">
         All sessions across all devices have been signed out to protect your account.
       </p>
-      <button class="btn btn-secondary" onclick="closeModal('modal-account-locked'); switchTab('user-portal');">
-        Sign In Again
-      </button>
+      <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+        <button class="btn btn-primary" onclick="closeModal('modal-account-locked'); switchTab('user-portal'); if (typeof switchAuthMode === 'function') switchAuthMode('login');">
+          Sign In
+        </button>
+        <button class="btn btn-secondary" onclick="closeModal('modal-account-locked'); openModal('modal-reset-password');">
+          Reset Password / Unlock
+        </button>
+      </div>
     </div>
   </div>
 
@@ -2201,6 +2440,26 @@
     }
     window.switchAuthTab = switchAuthTab;
     window.toggleAuthTab = switchAuthTab;
+  </script>
+
+  <!-- Service Worker Registration for Offline Caching, Background Sync & Push Alerts -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+          .then(function(registration) {
+            console.log('[ServiceWorker] Successfully registered with root scope:', registration.scope);
+            if ('periodicSync' in registration) {
+              registration.periodicSync.register('hourly-health-audit', {
+                minInterval: 60 * 60 * 1000
+              }).catch(function() {});
+            }
+          })
+          .catch(function(err) {
+            console.warn('[ServiceWorker] Registration notice:', err);
+          });
+      });
+    }
   </script>
 
 <!-- Production UX State Overlays -->

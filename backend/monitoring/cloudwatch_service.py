@@ -119,37 +119,52 @@ class CloudWatchService:
 
     def get_dashboard_summary(self) -> Dict[str, Any]:
         with self.lock:
-            eval_count = max(1, self.metrics["RiskEvaluations"])
-            inv_count = max(1, self.metrics["Invocations"])
-            avg_risk = round(self.metrics["RiskScoreSum"] / eval_count, 1) if self.metrics["RiskEvaluations"] > 0 else 0.0
-            avg_latency = round(self.metrics["TotalExecutionLatencyMs"] / inv_count, 2)
+            eval_count = max(1, self.metrics.get("RiskEvaluations", 0))
+            inv_count = max(1, self.metrics.get("Invocations", 0))
+            risk_sum = self.metrics.get("RiskScoreSum", 0.0)
+            avg_risk = round(risk_sum / eval_count, 1) if self.metrics.get("RiskEvaluations", 0) > 0 else 0.0
+            latency_sum = self.metrics.get("TotalExecutionLatencyMs", 0.0)
+            avg_latency = round(latency_sum / inv_count, 2)
 
-            # Get recent 30 CloudWatch logs
-            recent_logs = db.cloudwatch_logs.find(sort_key="timestamp", reverse=True, limit=30)
+            cleaned_logs = []
+            try:
+                raw_logs = db.cloudwatch_logs.find(sort_key="timestamp", reverse=True, limit=50)
+                for log in raw_logs:
+                    if isinstance(log, dict):
+                        l = dict(log)
+                        if "_id" in l:
+                            l["_id"] = str(l["_id"])
+                        cleaned_logs.append(l)
+            except Exception as e:
+                print(f"[CLOUDWATCH SERVICE] Error retrieving logs: {e}")
 
             return {
                 "metrics": {
-                    "Invocations": self.metrics["Invocations"],
-                    "HighRiskDetections": self.metrics["HighRiskDetections"],
-                    "BlockedHijacks": self.metrics["BlockedHijacks"],
-                    "StepUpMFAChallenges": self.metrics["StepUpMFAChallenges"],
-                    "NormalLogins": self.metrics["NormalLogins"],
+                    "Invocations": self.metrics.get("Invocations", 0),
+                    "HighRiskDetections": self.metrics.get("HighRiskDetections", 0),
+                    "BlockedHijacks": self.metrics.get("BlockedHijacks", 0),
+                    "StepUpMFAChallenges": self.metrics.get("StepUpMFAChallenges", 0),
+                    "NormalLogins": self.metrics.get("NormalLogins", 0),
                     "AvgRiskScore": avg_risk,
                     "AvgExecutionLatencyMs": avg_latency
                 },
                 "alarms": list(self.alarms.values()),
-                "recent_logs": recent_logs,
+                "recent_logs": cleaned_logs,
                 "timeseries": self.metric_timeseries[-50:]
             }
 
     def clear_logs(self):
         """Clears all audit logs and resets metric telemetry counters."""
         with self.lock:
-            db.cloudwatch_logs.delete_many({})
+            try:
+                db.cloudwatch_logs.delete_many({})
+            except Exception as e:
+                print(f"[CLOUDWATCH] Error clearing logs: {e}")
             self.metric_timeseries.clear()
             self.metrics = {
                 "Invocations": 0,
                 "HighRiskDetections": 0,
+                "BruteForceBlocks": 0,
                 "BlockedHijacks": 0,
                 "StepUpMFAChallenges": 0,
                 "NormalLogins": 0,

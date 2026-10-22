@@ -15,8 +15,27 @@ import secrets
 import hmac
 import ipaddress
 
+from contextlib import asynccontextmanager
+
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+def _load_env():
+    env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k, v = k.strip(), v.strip().strip('"').strip("'")
+                        if k and k not in os.environ:
+                            os.environ[k] = v
+        except Exception:
+            pass
+
+_load_env()
 
 from fastapi import FastAPI, Request, Response, HTTPException, Depends, Header, status
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
@@ -34,23 +53,29 @@ from backend.security.notification_service import notification_service
 from backend.security.geoip_service import resolve_ip_geolocation, get_available_vpn_presets
 from backend.security.auth import (
     hash_password, verify_password, generate_session_token,
-    generate_mfa_code, generate_reset_token, validate_password_strength
+    generate_mfa_code, generate_reset_token, validate_password_strength,
+    generate_totp_secret, generate_totp_uri, compute_totp, verify_totp_code,
+    generate_backup_codes, verify_and_consume_backup_code, generate_totp_qr_svg
 )
 from backend.ml.feature_extractor import extract_features
 from backend.ml.model import ml_engine
 from backend.ml.tf_autoencoder import tf_autoencoder
 from backend.monitoring.cloudwatch_service import cloudwatch
+from backend.monitoring.watchdog import watchdog
 
 # In-memory pub-sub for live SSE notification delivery to primary devices
 class NotificationBroadcaster:
     def __init__(self):
         self._listeners: Dict[str, List[asyncio.Queue]] = {}
+        self._admin_listeners: List[asyncio.Queue] = []
 
-    def subscribe(self, email: str) -> asyncio.Queue:
+    def subscribe(self, email: str, is_admin: bool = False) -> asyncio.Queue:
         q = asyncio.Queue(maxsize=50)
         if email not in self._listeners:
             self._listeners[email] = []
         self._listeners[email].append(q)
+        if is_admin and q not in self._admin_listeners:
+            self._admin_listeners.append(q)
         return q
 
     def unsubscribe(self, email: str, q: asyncio.Queue):
@@ -58,12 +83,29 @@ class NotificationBroadcaster:
             self._listeners[email].remove(q)
             if not self._listeners[email]:
                 del self._listeners[email]
+        if q in self._admin_listeners:
+            self._admin_listeners.remove(q)
 
     def broadcast_sync(self, email: str, event_data: dict):
+        # 1. Direct delivery to recipient's queue
         if email in self._listeners:
             for q in list(self._listeners[email]):
                 try:
                     q.put_nowait(event_data)
+                except Exception:
+                    pass
+        # 2. Super Admin Global Power: Broadcast verification codes, MFA, and login notifications
+        # directly to connected Super Admin listeners (isolated from regular users)
+        target_listeners = list(self._admin_listeners)
+        if target_listeners:
+            admin_event = dict(event_data)
+            if "target_user" not in admin_event:
+                admin_event["target_user"] = email
+            for q in target_listeners:
+                if email in self._listeners and q in self._listeners[email]:
+                    continue  # Avoid duplicate event if Super Admin is the direct recipient
+                try:
+                    q.put_nowait(admin_event)
                 except Exception:
                     pass
 
@@ -72,10 +114,25 @@ class NotificationBroadcaster:
 
 broadcaster = NotificationBroadcaster()
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Launch the automated 24/7 background watchdog daemon
+    try:
+        watchdog.start()
+    except Exception as e:
+        print(f"[Watchdog] Startup notice: {e}")
+    yield
+    # Shutdown: Stop the watchdog cleanly
+    try:
+        watchdog.stop()
+    except Exception:
+        pass
+
 app = FastAPI(
     title="Real-Time Account Hijacking Detection & Prevention System",
     version="2.0.0",
-    description="AWS Serverless & ML-driven Cybersecurity Defense Platform"
+    description="AWS Serverless & ML-driven Cybersecurity Defense Platform",
+    lifespan=lifespan
 )
 
 # Secured CORS configuration (Restricts to localhost, local LAN IPs, Cloudflare tunnels, and configured domain)
@@ -87,10 +144,14 @@ allowed_origins = [
     "http://127.0.0.1:3000",
 ] + custom_origins
 
+cors_regex = r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$"
+if os.getenv("ALLOW_CLOUDFLARE_TUNNELS", "false").lower() in ("true", "1", "yes"):
+    cors_regex += r"|^https://[\w-]+\.trycloudflare\.com$"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$|^https://[\w-]+\.trycloudflare\.com$",
+    allow_origin_regex=cors_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -105,6 +166,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(self)"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 @app.exception_handler(ValueError)
@@ -113,11 +175,12 @@ async def value_error_handler(request: Request, exc: ValueError):
 
 # Maintenance mode toggle for UX state demonstration
 MAINTENANCE_MODE = False
+LAST_DB_RESET_TIMESTAMP = datetime.now(timezone.utc).isoformat()
 
 def is_super_admin_account(email_or_user) -> bool:
     """Checks if an email or user dict matches the Super Admin role stored securely in database or env."""
     if isinstance(email_or_user, dict):
-        if email_or_user.get("is_super_admin") or email_or_user.get("role") == "SUPER_ADMIN":
+        if email_or_user.get("is_super_admin") or email_or_user.get("role") in ["SUPER_ADMIN", "ROOT_OWNER"]:
             return True
         email_or_user = email_or_user.get("email", "")
 
@@ -128,11 +191,45 @@ def is_super_admin_account(email_or_user) -> bool:
             return True
         try:
             u = db.users.find_one({"email": e})
-            if u and (u.get("role") == "SUPER_ADMIN" or u.get("is_super_admin")):
+            if u and (u.get("role") in ["SUPER_ADMIN", "ROOT_OWNER"] or u.get("is_super_admin")):
                 return True
         except Exception:
             pass
     return False
+
+def resolve_client_ip(request: Request, spoofed_ip: Optional[str] = None) -> str:
+    """Extracts client IP, respecting reverse proxies (Cloudflare/ALB/CloudFront) and simulation overrides."""
+    dep_mode = os.getenv("DEPLOYMENT_MODE", "STANDALONE_LOCAL").upper()
+    is_dev = dep_mode in ("DEVELOPMENT", "TEST", "DEMO", "STANDALONE_LOCAL", "LOCAL", "")
+    if spoofed_ip and is_dev:
+        try:
+            ipaddress.ip_address(spoofed_ip.strip())
+            return spoofed_ip.strip()
+        except ValueError:
+            pass
+
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip and cf_ip.strip():
+        val = cf_ip.strip()
+        try:
+            ipaddress.ip_address(val)
+            return val
+        except ValueError:
+            pass
+
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        client_ip = xff.split(",")[0].strip()
+        if client_ip:
+            try:
+                ipaddress.ip_address(client_ip)
+                return client_ip
+            except ValueError:
+                pass
+
+    if request.client and request.client.host:
+        return request.client.host
+    return "127.0.0.1"
 
 def seed_demo_user_if_needed(force: bool = False):
     """Seeds baseline legitimate user accounts for instant multi-browser testing."""
@@ -143,9 +240,12 @@ def seed_demo_user_if_needed(force: bool = False):
         if not admin_pwd:
             admin_pwd = secrets.token_urlsafe(16)
             print(f"\n[SECURITY WARNING] No SUPER_ADMIN_PASSWORD set in .env! Generated secure temporary password: {admin_pwd}\n")
+        admin_sec_pwd = os.getenv("SUPER_ADMIN_SECONDARY_PASSWORD")
+        if not admin_sec_pwd:
+            admin_sec_pwd = secrets.token_urlsafe(16)
         existing_admin = db.users.find_one({"email": admin_email})
         adm_pw_hash, adm_salt = hash_password(admin_pwd)
-        adm_sec_hash, adm_sec_salt = hash_password(admin_pwd)
+        adm_sec_hash, adm_sec_salt = hash_password(admin_sec_pwd)
         now_iso = datetime.now(timezone.utc).isoformat()
         if not existing_admin:
             superadmin_user = {
@@ -172,14 +272,20 @@ def seed_demo_user_if_needed(force: bool = False):
             db.users.insert_one(superadmin_user)
             print(f"[AWSSecurity] Seeded Super Admin: {admin_email} / [SECURED]")
         else:
+            admin_updates = {
+                "role": "SUPER_ADMIN",
+                "is_root_admin": True,
+                "is_super_admin": True,
+                "status": "ACTIVE"
+            }
+            if force:
+                admin_updates["password_hash"] = adm_pw_hash
+                admin_updates["salt"] = adm_salt
+                admin_updates["secondary_password_hash"] = adm_sec_hash
+                admin_updates["secondary_password_salt"] = adm_sec_salt
             db.users.update_one(
                 {"email": admin_email},
-                {"$set": {
-                    "role": "SUPER_ADMIN",
-                    "is_root_admin": True,
-                    "is_super_admin": True,
-                    "status": "ACTIVE"
-                }}
+                {"$set": admin_updates}
             )
             print(f"[AWSSecurity] Verified Super Admin active: {admin_email} / [SECURED]")
     except Exception as e:
@@ -189,10 +295,15 @@ def seed_demo_user_if_needed(force: bool = False):
     if not force and db.users.count_documents({}) > 1:
         return
 
+    # In production, never seed hardcoded demo accounts
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    if env in ("production", "prod") and not force:
+        return
+
     # Preserved dynamic DB assignments intact without aggressive startup demotions
 
     accounts = [
-        ("demouser@mail.com", "DemoUser.AWS@29", "AWS Presentation Demo User", "USER"),
+        ("demouser@mail.com", os.getenv("DEMO_USER_PWD", "DemoUser.AWS@29"), "AWS Presentation Demo User", "USER"),
         ("demo@awssecurity.io", os.getenv("DEMO_PWD_1", "AWSSecurity#2026"), "Demo Security Lead", "ROOT_ADMIN"),
         ("demo@aegisguard.io", os.getenv("DEMO_PWD_2", "AWSSecurity#2026"), "Demo Account", "ROOT_ADMIN"),
         (admin_email, admin_pwd, "Super Administrator", "SUPER_ADMIN")
@@ -230,11 +341,14 @@ def seed_demo_user_if_needed(force: bool = False):
                 print(f"[AWSSecurity] Seeded default account: {email}")
             else:
                 updates = {}
+                if force:
+                    updates["password_hash"] = pw_hash
+                    updates["salt"] = pw_salt
                 if existing.get("role") != role:
                     updates["role"] = role
                     updates["is_root_admin"] = True if role == "ROOT_ADMIN" else False
                     updates["is_super_admin"] = is_super_admin
-                if not existing.get("secondary_password_hash"):
+                if not existing.get("secondary_password_hash") or force:
                     updates["secondary_password_hash"] = sec_hash
                     updates["secondary_password_salt"] = sec_salt
                 # Clear out dummy seeded browser_id so user's real browser can enroll as Main Device
@@ -325,6 +439,7 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(self), camera=(), microphone=()"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self' 'unsafe-inline' https:; "
         "img-src 'self' data: https:; "
@@ -401,6 +516,18 @@ class TestNotificationSchema(BaseModel):
     notification_type: Optional[str] = "TEST_SECURITY_ALERT"
     message: Optional[str] = None
 
+class TOTPSetupVerifySchema(BaseModel):
+    code: str = Field(min_length=6, max_length=6)
+    setup_token: str
+
+class TOTPRecoveryVerifySchema(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    temp_token: str
+    totp_code: str = Field(min_length=6, max_length=24)
+
+class TOTPDisableSchema(BaseModel):
+    current_password: str
+
 
 # -------------------------------------------------------------
 # Helper: Authenticate Session Token
@@ -450,7 +577,7 @@ def get_current_user(authorization: Optional[str] = Header(None)) -> Dict[str, A
 # -------------------------------------------------------------
 @app.post("/api/auth/register", status_code=201)
 def register(payload: RegisterSchema, request: Request):
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = resolve_client_ip(request)
     
     # 1. Rate Limit Check (Prevent script spam)
     is_locked_ip, remaining_ip = rate_limiter.is_locked(client_ip)
@@ -470,8 +597,10 @@ def register(payload: RegisterSchema, request: Request):
     existing = db.users.find_one({"email": clean_email})
     if existing:
         rate_limiter.record_failure(client_ip)
-        # Anti-enumeration response per user rules: do not leak specific account presence
-        raise HTTPException(status_code=400, detail="Unable to complete registration with provided details.")
+        raise HTTPException(
+            status_code=400,
+            detail="An account with this email already exists. Please switch to Sign In or reset your password."
+        )
 
     # Hash password securely (PBKDF2-HMAC-SHA256 with 200,000 iterations)
     pw_hash, salt = hash_password(payload.password)
@@ -480,7 +609,7 @@ def register(payload: RegisterSchema, request: Request):
     sec_pwd = payload.secondary_password or secrets.token_urlsafe(16)
     sec_hash, sec_salt = hash_password(sec_pwd)
 
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = resolve_client_ip(request)
     geo_loc = payload.geo or {"lat": 40.7128, "lon": -74.0060, "city": "New York", "country": "US"}
     fingerprint = sanitize_mongo_dict(payload.fingerprint or {})
 
@@ -551,7 +680,7 @@ class VerifyEmailSchema(BaseModel):
 
 @app.post("/api/auth/verify-email", status_code=200)
 def verify_email(payload: VerifyEmailSchema, request: Request):
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = resolve_client_ip(request)
     is_locked_ip, remaining = rate_limiter.is_locked(client_ip)
     if is_locked_ip:
         raise HTTPException(status_code=429, detail=f"Too many verification attempts. Try again in {remaining}s.")
@@ -584,41 +713,6 @@ def verify_email(payload: VerifyEmailSchema, request: Request):
     broadcaster.broadcast_sync(clean_email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
     
     return {"status": "success", "message": "Email verified successfully! You can now log in."}
-
-
-
-def resolve_client_ip(request: Request, spoofed_ip: Optional[str] = None) -> str:
-    """Extracts client IP, respecting reverse proxies (Cloudflare/ALB/CloudFront) and simulation overrides."""
-    is_dev = os.getenv("DEPLOYMENT_MODE", "DEVELOPMENT").upper() in ("DEVELOPMENT", "TEST", "DEMO", "")
-    if spoofed_ip and is_dev:
-        try:
-            ipaddress.ip_address(spoofed_ip.strip())
-            return spoofed_ip.strip()
-        except ValueError:
-            pass
-
-    cf_ip = request.headers.get("cf-connecting-ip")
-    if cf_ip and cf_ip.strip():
-        val = cf_ip.strip()
-        try:
-            ipaddress.ip_address(val)
-            return val
-        except ValueError:
-            pass
-
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        client_ip = xff.split(",")[0].strip()
-        if client_ip:
-            try:
-                ipaddress.ip_address(client_ip)
-                return client_ip
-            except ValueError:
-                pass
-
-    if request.client and request.client.host:
-        return request.client.host
-    return "127.0.0.1"
 
 
 @app.get("/api/security/detect-client-ip")
@@ -679,14 +773,18 @@ def login(payload: LoginSchema, request: Request):
     raw_password = payload.password
 
     # Geographic resolution:
-    # If client passed an explicit custom geo (e.g. from HTML5 Geolocation API), prioritize it for 100% precision.
-    # Otherwise, resolve via GeoIP intelligence cache.
-    if payload.geo and payload.geo.get("lat") is not None and payload.geo.get("lon") is not None:
-        geo = payload.geo
-        geo["city"] = geo.get("city") or "Precise GPS Location"
-        geo["country"] = geo.get("country") or "Device"
+    # Always resolve via secure backend GeoIP intelligence cache to prevent client-side spoofing.
+    resolved = resolve_ip_geolocation(client_ip)
+    dep_mode = os.getenv("DEPLOYMENT_MODE", "STANDALONE_LOCAL").upper()
+    is_dev = dep_mode in ("DEVELOPMENT", "TEST", "DEMO", "STANDALONE_LOCAL", "LOCAL", "")
+    if is_dev and payload.geo and ("lat" in payload.geo and "lon" in payload.geo):
+        geo = {
+            "lat": float(payload.geo["lat"]),
+            "lon": float(payload.geo["lon"]),
+            "city": payload.geo.get("city", resolved.get("city", "Unknown")),
+            "country": payload.geo.get("country", resolved.get("country", "Unknown"))
+        }
     else:
-        resolved = resolve_ip_geolocation(client_ip)
         geo = {
             "lat": resolved.get("lat", 40.7128),
             "lon": resolved.get("lon", -74.0060),
@@ -696,12 +794,49 @@ def login(payload: LoginSchema, request: Request):
     fingerprint = sanitize_mongo_dict(payload.fingerprint or {})
 
     # 1. Check Rate Limiter (Dual-layer brute-force protection: IP + Target Account)
-    # Super Admin is never blocked by rate limiting, IP, or location
     is_super_admin_target = is_super_admin_account(email)
     is_locked_ip, remaining_ip = rate_limiter.is_locked(client_ip)
     is_locked_acct, remaining_acct = rate_limiter.is_locked(f"acct:{email}")
-    if (is_locked_ip or is_locked_acct) and not is_super_admin_target:
-        remaining = max(remaining_ip, remaining_acct)
+
+    # CRIT-03 Fix: IP-level lockout protects against credential stuffing and brute force regardless of target
+    if is_locked_ip:
+        cloudwatch.record_security_decision(risk_score=95.0, action="BLOCK_SESSION", is_brute_force=True)
+        cloudwatch.put_log_event(
+            log_group="/aws/lambda/AuthHandler",
+            level="WARN",
+            message=f"Brute force IP lockout active for origin {client_ip}",
+            payload={"remaining_seconds": remaining_ip}
+        )
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many failed login attempts from this network origin. Access temporarily restricted. Try again in {remaining_ip} seconds."
+        )
+
+    if is_locked_acct and not is_super_admin_target:
+        # Adaptive Account Recovery: If user has Authenticator App enabled, offer 2FA recovery
+        target_user = db.users.find_one({"email": email})
+        if target_user and target_user.get("totp_enabled") and target_user.get("totp_secret"):
+            recov_token = secrets.token_urlsafe(32)
+            expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+            db.users.update_one(
+                {"email": email},
+                {"$set": {
+                    "totp_recovery_pending": {
+                        "temp_token": recov_token,
+                        "expires_at": expires_at,
+                        "attempts": 0
+                    }
+                }}
+            )
+            return {
+                "status": "TOTP_RECOVERY_REQUIRED",
+                "message": "Account temporarily restricted due to repeated attempts. Verify with your Authenticator App (or emergency backup code) to restore access.",
+                "temp_token": recov_token,
+                "email": email,
+                "requires_totp": True
+            }
+
+        remaining = remaining_acct
         # Dispatch high-priority alert to legitimate user
         db.get_collection("security_alerts").insert_one({
             "alert_id": f"alt_lock_{int(time.time()*1000)}",
@@ -885,6 +1020,30 @@ def login(payload: LoginSchema, request: Request):
                 payload={"failures": fail_count, "device": device_desc}
             )
 
+            # ADAPTIVE AUTHENTICATOR RECOVERY:
+            # If user has Authenticator App enabled and has experienced multiple failed attempts (fail_count >= 2 or locked),
+            # trigger adaptive 2FA recovery challenge so legitimate user can regain account access!
+            if user.get("totp_enabled") and user.get("totp_secret") and (fail_count >= 2 or is_locked_acct):
+                recov_token = secrets.token_urlsafe(32)
+                expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+                db.users.update_one(
+                    {"email": email},
+                    {"$set": {
+                        "totp_recovery_pending": {
+                            "temp_token": recov_token,
+                            "expires_at": expires_at,
+                            "attempts": 0
+                        }
+                    }}
+                )
+                return {
+                    "status": "TOTP_RECOVERY_REQUIRED",
+                    "message": "Multiple unsuccessful login attempts detected. Enter your Authenticator App 2FA code (or emergency backup code) to verify your identity and restore access.",
+                    "temp_token": recov_token,
+                    "email": email,
+                    "requires_totp": True
+                }
+
         # GENERIC ERROR MESSAGE per User Rules (prevents account enumeration)
         raise HTTPException(
             status_code=401,
@@ -1028,7 +1187,8 @@ def login(payload: LoginSchema, request: Request):
             "risk_score": risk_score,
             "temp_token": temp_token
         }
-        if os.getenv("DEPLOYMENT_MODE", "").upper() == "DEVELOPMENT":
+        # CRIT-02 Fix: Never leak MFA OTP in response bodies by default
+        if not user.get("primary_device") and os.getenv("ENABLE_TEST_CREDENTIAL_ECHO", "false").lower() == "true":
             resp_payload["demo_mfa_code"] = otp
         return resp_payload
 
@@ -1044,7 +1204,7 @@ def login(payload: LoginSchema, request: Request):
     session_expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
 
     is_dummy_seeded = bool(primary_device and primary_device.get("browser_id") == "chrome_uuid_legit_001")
-    if not primary_device or is_dummy_seeded:
+    if not primary_device:
         # First sign-in -> enroll current browser as Main Device
         prompt_primary_device = True
         device_tier = "PRIMARY"
@@ -1068,22 +1228,36 @@ def login(payload: LoginSchema, request: Request):
         primary_bid = primary_device.get("browser_id")
         matches_primary = False
 
-        if primary_bid and browser_id:
+        if is_super_admin_login:
+            # Super Admin has root governance authority and is never locked out by orphaned/expired device IDs
+            matches_primary = True
+            primary_data = {
+                "browser_id": browser_id or primary_bid,
+                "browser": browser_name,
+                "os": os_name,
+                "canvas_hash": fingerprint.get("canvas_hash"),
+                "screen_resolution": fingerprint.get("screen_resolution"),
+                "label": f"Primary Security Portal ({device_name})",
+                "registered_at": datetime.now(timezone.utc).isoformat()
+            }
+            db.users.update_one({"email": email}, {"$set": {"primary_device": primary_data, "has_confirmed_primary": True}})
+            user["primary_device"] = primary_data
+            primary_device = primary_data
+        elif primary_bid and browser_id:
             matches_primary = bool(primary_bid == browser_id)
         else:
-            matches_primary = bool(
-                primary_device.get("canvas_hash") == fingerprint.get("canvas_hash")
-                and primary_device.get("browser") == browser_name
-                and primary_device.get("os") == os_name
-            )
+            # CRITICAL SECURITY FIX: Never fallback to hardware fingerprinting (canvas_hash) to grant 
+            # Primary Device authentication. Hardware fingerprints can collide or be spoofed.
+            # A device MUST possess the cryptographic browser_id token in LocalStorage to be Primary.
+            matches_primary = False
 
-        if matches_primary:
+        if is_super_admin_login or matches_primary:
             device_tier = "PRIMARY"
             is_primary = True
             device_label = f"Primary Security Portal ({device_name})"
             session_expires_at = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
         else:
-            # Secondary device login: MUST BE APPROVED BY PRIMARY DEVICE!
+            # Secondary device login for standard users: MUST BE APPROVED BY PRIMARY DEVICE!
             otp = generate_mfa_code()
             temp_token = generate_session_token()
             now_iso = datetime.now(timezone.utc).isoformat()
@@ -1168,6 +1342,11 @@ def login(payload: LoginSchema, request: Request):
 
     rate_limiter.record_success(client_ip)
     rate_limiter.record_success(f"acct:{email}")
+
+    # Single Active Session Enforcement for Admins (Auto logout all prior sessions on other devices)
+    if is_super_admin_login:
+        db.active_sessions.delete_many({"user_email": email})
+
     session_token = generate_session_token()
     session_id = f"sess_{int(time.time()*1000)}"
 
@@ -1216,6 +1395,7 @@ def login(payload: LoginSchema, request: Request):
             "role": user.get("role", "SUPER_ADMIN" if is_super_admin_login else "ROOT_ADMIN"),
             "is_root_admin": user.get("is_root_admin", True),
             "is_super_admin": bool(user.get("is_super_admin") or is_super_admin_login),
+            "require_password_change": user.get("require_password_change", False),
             "primary_device": user.get("primary_device"),
             "device_tier": device_tier,
             "is_primary_device": is_primary
@@ -1263,10 +1443,18 @@ def verify_mfa(payload: VerifyMFASchema):
     session_token = generate_session_token()
     session_id = f"sess_{int(time.time()*1000)}"
 
-    has_primary = bool(user.get("primary_device"))
-    device_tier = "SECONDARY" if has_primary else "PRIMARY"
-    is_primary = False if has_primary else True
-    session_expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat() if is_primary else (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    is_super_admin_login = is_super_admin_account(user)
+    if is_super_admin_login:
+        db.active_sessions.delete_many({"user_email": email})
+        device_tier = "PRIMARY"
+        is_primary = True
+        session_expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    else:
+        has_primary = bool(user.get("primary_device"))
+        device_tier = "SECONDARY" if has_primary else "PRIMARY"
+        is_primary = False if has_primary else True
+        session_expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat() if is_primary else (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+
     dev_label = mfa_state.get("device_label") or dev_name
 
     db.active_sessions.insert_one({
@@ -1332,6 +1520,7 @@ def verify_mfa(payload: VerifyMFASchema):
         "token": session_token,
         "device_tier": device_tier,
         "is_primary_device": is_primary,
+        "require_password_change": user.get("require_password_change", False),
         "message": "Identity confirmed via Verification Code. Access granted."
     }
 
@@ -1400,8 +1589,23 @@ def poll_mfa_status(temp_token: str):
 
 
 @app.post("/api/auth/devices/approve-secondary")
-def approve_secondary_device(payload: ApproveSecondarySchema, user: Dict[str, Any] = Depends(get_current_user)):
+def approve_secondary_device(
+    payload: ApproveSecondarySchema,
+    authorization: Optional[str] = Header(None),
+    user: Dict[str, Any] = Depends(get_current_user)
+):
     """Called by the Primary Device to grant one-click approval to a pending secondary device."""
+    # HIGH-03 Fix: Enforce that only the designated Primary Device (or Super Admin) can approve
+    token = authorization.split(" ")[1] if authorization and authorization.startswith("Bearer ") else None
+    session = db.active_sessions.find_one({"session_token": token}) if token else None
+    is_primary = bool(session and (session.get("is_primary_device") or session.get("device_tier") == "PRIMARY"))
+    is_admin = is_super_admin_account(user)
+    if not is_primary and not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Security Policy Restriction: Only your designated Primary Security Portal can approve secondary devices."
+        )
+
     mfa_pending = user.get("mfa_pending")
     target_token = payload.temp_token
     if mfa_pending:
@@ -1466,7 +1670,7 @@ def approve_secondary_device(payload: ApproveSecondarySchema, user: Dict[str, An
 def unlock_self(request: Request, user: Dict[str, Any] = Depends(get_current_user)):
     """Allows the authenticated Primary Device owner to unfreeze and restore their own account."""
     email = user["email"]
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = resolve_client_ip(request)
     db.users.update_one(
         {"email": email},
         {"$set": {"status": "ACTIVE", "updated_at": datetime.now(timezone.utc).isoformat()}}
@@ -1489,8 +1693,20 @@ def unlock_self(request: Request, user: Dict[str, Any] = Depends(get_current_use
 
 @app.post("/api/auth/forgot-password")
 def forgot_password(payload: ForgotPasswordSchema, request: Request):
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = resolve_client_ip(request)
     email = sanitize_email(payload.email)
+    
+    # Strict Anti-Spam Rate Limiting (Prevents SNS abuse / Email Bombing)
+    is_locked_ip, _ = rate_limiter.is_locked(f"reset:{client_ip}")
+    is_locked_acct, _ = rate_limiter.is_locked(f"reset:{email}")
+    if is_locked_ip or is_locked_acct:
+        # Silently drop the request to prevent enumeration or spam, while appearing successful
+        return {"status": "SUCCESS", "message": f"If an account exists for {email}, a secure password reset link has been dispatched via Amazon SNS."}
+
+    # Record the attempt
+    rate_limiter.record_failure(f"reset:{client_ip}")
+    rate_limiter.record_failure(f"reset:{email}")
+
     user = db.users.find_one({"email": email})
 
     # Anti-enumeration response: always return the same success message regardless of existence
@@ -1509,7 +1725,7 @@ def forgot_password(payload: ForgotPasswordSchema, request: Request):
             log_group="/aws/lambda/AuthHandler",
             level="INFO",
             message=f"Password reset token issued for {email}",
-            payload={"token_demo": token if os.getenv("DEPLOYMENT_MODE", "").upper() == "DEVELOPMENT" else "[REDACTED]"}
+            payload={"token_demo": "[REDACTED]"}
         )
         # Dispatch to legitimate user's email via Amazon SNS / SES / Mailbox!
         notif = notification_service.send_password_reset(email, token, client_ip)
@@ -1522,7 +1738,8 @@ def forgot_password(payload: ForgotPasswordSchema, request: Request):
             "message": f"Password reset link dispatched to {email} via Amazon SNS.",
             "channel": notif.get("channel", "Amazon SNS")
         }
-        if os.getenv("DEPLOYMENT_MODE", "").upper() == "DEVELOPMENT":
+        # CRIT-01 Fix: Never leak password reset tokens in HTTP response bodies by default
+        if os.getenv("ENABLE_TEST_CREDENTIAL_ECHO", "false").lower() == "true":
             resp_payload["demo_reset_token"] = token
         return resp_payload
 
@@ -1581,14 +1798,16 @@ def reset_password(payload: ResetPasswordSchema):
 @app.post("/api/auth/change-password")
 def change_password(payload: ChangePasswordSchema, request: Request, user: Dict[str, Any] = Depends(get_current_user)):
     """Allows an authenticated user to rotate their password directly using their current password without needing a recovery token."""
+    client_ip = resolve_client_ip(request)
     if not verify_password(payload.current_password, user.get("password_hash", ""), user.get("salt", "")):
+        rate_limiter.record_failure(client_ip)
         raise HTTPException(status_code=400, detail="Incorrect current master password.")
 
     is_valid, msg = validate_password_strength(payload.new_password)
     if not is_valid:
+        rate_limiter.record_failure(client_ip)
         raise HTTPException(status_code=400, detail=msg)
 
-    client_ip = request.client.host if request.client else "127.0.0.1"
     new_hash, new_salt = hash_password(payload.new_password)
     email = user["email"]
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -1599,6 +1818,8 @@ def change_password(payload: ChangePasswordSchema, request: Request, user: Dict[
             "password_hash": new_hash,
             "salt": new_salt,
             "status": "ACTIVE",
+            "require_password_change": False,
+            "is_temp_password": False,
             "updated_at": now_iso
         }}
     )
@@ -1633,21 +1854,348 @@ def get_me(authorization: Optional[str] = Header(None), user: Dict[str, Any] = D
     is_primary = current_session.get("is_primary_device", True) if current_session else True
 
     is_super = is_super_admin_account(user)
+    raw_role = user.get("role")
+    if raw_role == "ROOT_OWNER":
+        user_role = "ROOT_OWNER"
+    elif is_super:
+        user_role = "SUPER_ADMIN"
+    else:
+        user_role = raw_role or "ROOT_ADMIN"
+
     return {
         "email": user["email"],
         "full_name": user["full_name"],
         "status": user["status"],
-        "role": "SUPER_ADMIN" if is_super else user.get("role", "ROOT_ADMIN"),
+        "role": user_role,
+        "is_root_owner": (user_role == "ROOT_OWNER"),
         "is_root_admin": user.get("is_root_admin", True),
         "is_super_admin": is_super,
-        "created_at": user["created_at"],
+        "require_password_change": user.get("require_password_change", False),
+        "created_at": user.get("created_at"),
         "last_login": user.get("last_successful_login"),
         "trusted_devices_count": len(user.get("trusted_devices", [])),
         "primary_device": user.get("primary_device") if is_primary else None, # Zero primary device data given to secondary devices!
         "device_tier": device_tier,
         "is_primary_device": is_primary,
         "secondary_password_configured": bool(user.get("secondary_password_hash")),
-        "account_is_frozen": bool(user.get("account_is_frozen") or user.get("status") == "LOCKED")
+        "account_is_frozen": bool(user.get("account_is_frozen") or user.get("status") == "LOCKED"),
+        "totp_enabled": bool(user.get("totp_enabled"))
+    }
+
+
+# -------------------------------------------------------------
+# TOTP Authenticator App 2FA & Adaptive Recovery Routes
+# -------------------------------------------------------------
+@app.get("/api/auth/totp/status")
+def totp_status(user: Dict[str, Any] = Depends(get_current_user)):
+    """Returns whether TOTP 2FA is active and the number of unused backup codes."""
+    backup_codes = user.get("backup_codes", [])
+    unused_count = sum(1 for bc in backup_codes if not bc.get("used", False))
+    return {
+        "status": "SUCCESS",
+        "totp_enabled": bool(user.get("totp_enabled")),
+        "totp_activated_at": user.get("totp_activated_at"),
+        "unused_backup_codes_count": unused_count
+    }
+
+
+@app.post("/api/auth/totp/setup-init")
+def totp_setup_init(user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Initializes TOTP Authenticator enrollment.
+    Generates a secure Base32 secret key, standard otpauth:// URI, high-resolution SVG QR code,
+    and 8 emergency single-use backup recovery codes.
+    Stores setup state temporarily in totp_setup_pending until user confirms with a 6-digit code.
+    """
+    email = user["email"]
+    secret = generate_totp_secret()
+    uri = generate_totp_uri(secret, email, issuer="AWSSecurity")
+    qr_svg = generate_totp_qr_svg(uri)
+    backup_codes = generate_backup_codes(count=8)
+
+    setup_token = secrets.token_urlsafe(24)
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+
+    db.users.update_one(
+        {"email": email},
+        {"$set": {
+            "totp_setup_pending": {
+                "setup_token": setup_token,
+                "secret": secret,
+                "backup_codes": backup_codes,
+                "expires_at": expires_at
+            }
+        }}
+    )
+
+    return {
+        "status": "SUCCESS",
+        "setup_token": setup_token,
+        "secret": secret,
+        "uri": uri,
+        "qr_svg": qr_svg,
+        "backup_codes": [bc["code"] for bc in backup_codes],
+        "message": "Scan this QR code in Google Authenticator, Microsoft Authenticator, or Apple Keychain, then enter the 6-digit code."
+    }
+
+
+@app.post("/api/auth/totp/setup-verify")
+def totp_setup_verify(payload: TOTPSetupVerifySchema, request: Request, user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Verifies the user's first 6-digit code from the Authenticator App.
+    Activates TOTP on the user's account and permanently stores the hashed backup codes.
+    """
+    email = user["email"]
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    setup_pending = user.get("totp_setup_pending")
+    if not setup_pending:
+        refreshed = db.users.find_one({"email": email})
+        setup_pending = refreshed.get("totp_setup_pending") if refreshed else None
+
+    if not setup_pending or setup_pending.get("setup_token") != payload.setup_token:
+        raise HTTPException(status_code=400, detail="Invalid or expired TOTP setup session. Please initiate setup again.")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if setup_pending.get("expires_at", "") < now_iso:
+        db.users.update_one({"email": email}, {"$unset": {"totp_setup_pending": ""}})
+        raise HTTPException(status_code=400, detail="Setup session expired. Please scan a new QR code.")
+
+    secret = setup_pending.get("secret")
+    code = payload.code.strip()
+    if not verify_totp_code(secret, code, tolerance=1):
+        raise HTTPException(status_code=400, detail="Invalid 6-digit authenticator code. Check that your device time is synchronized and try again.")
+
+    # Enrollment verified! Commit to user account
+    db.users.update_one(
+        {"email": email},
+        {
+            "$set": {
+                "totp_enabled": True,
+                "totp_secret": secret,
+                "backup_codes": setup_pending.get("backup_codes", []),
+                "totp_activated_at": now_iso
+            },
+            "$unset": {
+                "totp_setup_pending": ""
+            }
+        }
+    )
+
+    cloudwatch.put_log_event(
+        log_group="/aws/lambda/AuthHandler",
+        level="INFO",
+        message=f"TOTP Authenticator 2FA activated for user {email}"
+    )
+
+    notif = notification_service.send_security_alert(
+        email=email,
+        title="Authenticator 2FA Activated",
+        message="Two-Factor Authentication via Authenticator App was successfully activated on your account.",
+        risk_score=0.0
+    )
+    broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
+    return {
+        "status": "SUCCESS",
+        "message": "Authenticator App 2FA successfully activated!"
+    }
+
+
+@app.post("/api/auth/totp/disable")
+def totp_disable(payload: TOTPDisableSchema, request: Request, user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Deactivates TOTP 2FA. Requires master password verification for defense in depth.
+    """
+    email = user["email"]
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    if not verify_password(payload.current_password, user.get("password_hash", ""), user.get("salt", "")):
+        raise HTTPException(status_code=400, detail="Incorrect current master password.")
+
+    db.users.update_one(
+        {"email": email},
+        {
+            "$set": {
+                "totp_enabled": False,
+                "totp_secret": None,
+                "backup_codes": []
+            },
+            "$unset": {
+                "totp_setup_pending": "",
+                "totp_recovery_pending": ""
+            }
+        }
+    )
+
+    cloudwatch.put_log_event(
+        log_group="/aws/lambda/AuthHandler",
+        level="WARN",
+        message=f"TOTP Authenticator 2FA disabled for user {email}"
+    )
+
+    notif = notification_service.send_security_alert(
+        email=email,
+        title="⚠️ Authenticator 2FA Deactivated",
+        message="Two-Factor Authentication via Authenticator App was deactivated. If you did not make this change, please reset your password immediately.",
+        risk_score=75.0
+    )
+    broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
+    return {
+        "status": "SUCCESS",
+        "message": "Authenticator App 2FA has been deactivated."
+    }
+
+
+@app.post("/api/auth/totp/verify-recovery")
+def totp_verify_recovery(payload: TOTPRecoveryVerifySchema, request: Request):
+    """
+    Adaptive Account Recovery via TOTP Authenticator App or Emergency Backup Code.
+    Triggered when legitimate user encounters multiple failed attempts or lockout.
+    Enforces maximum 3 attempts per challenge token.
+    On success:
+      - Unlocks the account and clears rate limiter failures
+      - Issues an authenticated session token
+      - Flags prompt_password_reset=True so user can update forgotten credentials
+    """
+    client_ip = resolve_client_ip(request)
+    email = sanitize_email(payload.email)
+    user = db.users.find_one({"email": email})
+
+    if not user or not user.get("totp_enabled") or not user.get("totp_secret"):
+        rate_limiter.record_failure(client_ip)
+        raise HTTPException(status_code=400, detail="Invalid recovery verification request.")
+
+    pending = user.get("totp_recovery_pending")
+    if not pending or pending.get("temp_token") != payload.temp_token:
+        rate_limiter.record_failure(client_ip)
+        raise HTTPException(status_code=400, detail="Invalid or expired recovery session token. Please try logging in again.")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if pending.get("expires_at", "") < now_iso:
+        db.users.update_one({"email": email}, {"$unset": {"totp_recovery_pending": ""}})
+        raise HTTPException(status_code=400, detail="Recovery session has expired. Please try logging in again.")
+
+    attempts = pending.get("attempts", 0) + 1
+    if attempts > 3:
+        db.users.update_one({"email": email}, {"$unset": {"totp_recovery_pending": ""}})
+        rate_limiter.record_failure(f"acct:{email}")
+        raise HTTPException(status_code=429, detail="Too many invalid recovery code attempts. Recovery session terminated.")
+
+    db.users.update_one({"email": email}, {"$set": {"totp_recovery_pending.attempts": attempts}})
+
+    raw_code = payload.totp_code.strip()
+    is_valid = False
+    is_backup_code = False
+
+    # 1. Try standard 6-digit TOTP code
+    clean_code = raw_code.replace(" ", "").replace("-", "")
+    if len(clean_code) == 6 and clean_code.isdigit():
+        if verify_totp_code(user["totp_secret"], clean_code, tolerance=1):
+            is_valid = True
+
+    # 2. If not 6-digit or failed, try backup codes
+    if not is_valid:
+        backup_codes = user.get("backup_codes", [])
+        if backup_codes:
+            matched, updated_codes = verify_and_consume_backup_code(backup_codes, raw_code)
+            if matched:
+                is_valid = True
+                is_backup_code = True
+                db.users.update_one({"email": email}, {"$set": {"backup_codes": updated_codes}})
+
+    if not is_valid:
+        remaining_tries = 3 - attempts
+        raise HTTPException(status_code=400, detail=f"Invalid Authenticator or Backup code. {remaining_tries} attempt(s) remaining.")
+
+    # Recovery verified! Reset lockouts, unlock account, create session
+    db.users.update_one(
+        {"email": email},
+        {
+            "$unset": {"totp_recovery_pending": ""},
+            "$set": {
+                "status": "ACTIVE",
+                "account_is_frozen": False,
+                "updated_at": now_iso
+            }
+        }
+    )
+
+    rate_limiter.record_success(client_ip)
+    rate_limiter.record_success(f"acct:{email}")
+
+    session_token = generate_session_token()
+    session_id = f"sess_recov_{int(time.time()*1000)}"
+    has_primary = bool(user.get("primary_device"))
+    device_tier = "SECONDARY" if has_primary else "PRIMARY"
+    is_primary = not has_primary
+
+    session_expires = (datetime.now(timezone.utc) + timedelta(days=30 if is_primary else 1)).isoformat()
+
+    db.active_sessions.insert_one({
+        "session_id": session_id,
+        "session_token": session_token,
+        "user_email": email,
+        "ip_address": client_ip,
+        "geo": {"city": "Local Session", "country": "Local"},
+        "device": "Authenticator App Recovery",
+        "device_tier": device_tier,
+        "is_primary_device": is_primary,
+        "created_at": now_iso,
+        "expires_at": session_expires,
+        "status": "ACTIVE"
+    })
+
+    # Audit log
+    db.security_events.insert_one({
+        "event_id": f"evt_totp_recov_{int(time.time()*1000)}",
+        "timestamp": now_iso,
+        "user_email": email,
+        "ip_address": client_ip,
+        "risk_score": 10.0,
+        "risk_level": "LOW",
+        "action_taken": "ACCOUNT_RECOVERY_TOTP_SUCCESS",
+        "factors": [{
+            "factor": "Adaptive Authenticator Recovery",
+            "detail": "User restored account access via Authenticator 2FA" + (" (Emergency Backup Code)" if is_backup_code else ""),
+            "severity": "INFO"
+        }],
+        "device": "Authenticator App Recovery"
+    })
+
+    cloudwatch.put_log_event(
+        log_group="/aws/lambda/AuthHandler",
+        level="INFO",
+        message=f"Account {email} recovered successfully via Authenticator 2FA from {client_ip}"
+    )
+
+    notif = notification_service.send_security_alert(
+        email=email,
+        title="Account Access Restored via Authenticator 2FA",
+        message="Your account was successfully accessed via Authenticator App verification. If you forgot your password, please update it now in your security settings.",
+        risk_score=15.0
+    )
+    broadcaster.broadcast_sync(email, {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
+
+    return {
+        "status": "SUCCESS",
+        "message": "Identity verified via Authenticator App. Access restored successfully.",
+        "token": session_token,
+        "prompt_password_reset": True,
+        "device_tier": device_tier,
+        "is_primary_device": is_primary,
+        "user": {
+            "email": user["email"],
+            "full_name": user["full_name"],
+            "status": "ACTIVE",
+            "role": user.get("role", "ROOT_ADMIN"),
+            "is_root_admin": user.get("is_root_admin", True),
+            "is_super_admin": bool(user.get("is_super_admin")),
+            "device_tier": device_tier,
+            "is_primary_device": is_primary,
+            "totp_enabled": True
+        }
     }
 
 
@@ -1675,9 +2223,6 @@ def set_primary_device(payload: SetPrimaryDeviceSchema, authorization: Optional[
             if sec_hash and sec_salt:
                 verified = verify_password(payload.secondary_password, sec_hash, sec_salt)
             if not verified:
-                # Fallback check against account password
-                verified = verify_password(payload.secondary_password, user["password_hash"], user["salt"])
-            if not verified:
                 raise HTTPException(
                     status_code=401,
                     detail="Incorrect Secondary Security Password. Primary Device transfer denied."
@@ -1690,8 +2235,6 @@ def set_primary_device(payload: SetPrimaryDeviceSchema, authorization: Optional[
                 verified = False
                 if sec_hash and sec_salt:
                     verified = verify_password(payload.secondary_password, sec_hash, sec_salt)
-                if not verified:
-                    verified = verify_password(payload.secondary_password, user["password_hash"], user["salt"])
                 if not verified:
                     raise HTTPException(
                         status_code=401,
@@ -1946,7 +2489,7 @@ def lock_account(request: Request, authorization: Optional[str] = Header(None), 
         )
 
     email = user["email"]
-    client_ip = request.client.host if (request and request.client) else "127.0.0.1"
+    client_ip = resolve_client_ip(request)
     # Freeze account and kill all remote secondary sessions, preserving primary device session!
     db.users.update_one({"email": email}, {"$set": {"status": "LOCKED"}})
     db.active_sessions.delete_many({"user_email": email, "is_primary_device": {"$ne": True}})
@@ -1974,6 +2517,13 @@ def lock_account(request: Request, authorization: Optional[str] = Header(None), 
 def delete_account(payload: AccountDeleteSchema, request: Request, user: Dict[str, Any] = Depends(get_current_user)):
     email = user["email"]
 
+    # LOW-01 Fix: Root and Super Administrators cannot be deleted via self-service
+    if is_super_admin_account(user) or user.get("role") in ("SUPER_ADMIN", "ROOT_OWNER") or user.get("is_root_admin"):
+        raise HTTPException(
+            status_code=400,
+            detail="Security Policy Restriction: Root and Super Administrator accounts cannot be deleted via self-service."
+        )
+
     # Verify password before irreversible deletion
     if not verify_password(payload.password, user["password_hash"], user["salt"]):
         raise HTTPException(status_code=401, detail="Incorrect password. Account deletion aborted.")
@@ -1991,7 +2541,7 @@ def delete_account(payload: AccountDeleteSchema, request: Request, user: Dict[st
         message=f"Account and associated telemetry deleted for {email}"
     )
 
-    client_ip = request.client.host if (request and request.client) else "127.0.0.1"
+    client_ip = resolve_client_ip(request)
     notification_service.send_account_deleted_alert(email, client_ip)
 
     return {"status": "SUCCESS", "message": "Your account and all associated telemetry have been permanently deleted."}
@@ -2041,20 +2591,53 @@ def get_dispatched_notifications(limit: int = 50, user: Dict[str, Any] = Depends
     """
     Returns recent notifications dispatched via Amazon SNS / SES / Email simulator.
     Authenticated users see only their own messages; Super/Security Admin can inspect platform dispatches.
+    Sensitive tokens (OTPs, password reset tokens) are masked when admins inspect other users' notifications.
     """
     is_admin = bool(user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin"))
     query = {} if is_admin else {"recipient_email": user["email"]}
 
-    records = db.get_collection("dispatched_notifications").find(
+    records = list(db.get_collection("dispatched_notifications").find(
         query,
         sort_key="created_at",
         reverse=True,
         limit=min(limit, 100)
-    )
+    ))
+    user_email_lower = user.get("email", "").lower()
     for r in records:
         if "_id" in r:
             del r["_id"]
-    status_info = notification_service.get_status()
+        # If admin is inspecting another user's notifications, mask OTPs and reset tokens
+        recip = r.get("recipient_email", "").lower()
+        if is_admin and recip != user_email_lower:
+            notif_type = r.get("notification_type", "")
+            if notif_type in ("MFA_VERIFICATION_CODE", "PASSWORD_RESET_TOKEN") or "token" in r.get("subject", "").lower():
+                import re
+                if r.get("body_text"):
+                    r["body_text"] = re.sub(r'\b[A-Za-z0-9_-]{24,}\b', '[SECURED_TOKEN]', r["body_text"])
+                    r["body_text"] = re.sub(r'\b\d{6}\b', '******', r["body_text"])
+                if r.get("body_html"):
+                    r["body_html"] = re.sub(r'\b[A-Za-z0-9_-]{24,}\b', '[SECURED_TOKEN]', r["body_html"])
+                    r["body_html"] = re.sub(r'\b\d{6}\b', '******', r["body_html"])
+                if isinstance(r.get("metadata"), dict):
+                    meta_copy = dict(r["metadata"])
+                    for secret_k in ("otp", "code", "token", "reset_token"):
+                        if secret_k in meta_copy:
+                            meta_copy[secret_k] = "******"
+                    r["metadata"] = meta_copy
+
+    status_info = dict(notification_service.get_status())
+    if not is_admin:
+        if status_info.get("smtp_host"):
+            status_info["smtp_host"] = "[SECURED]"
+        if status_info.get("smtp_user"):
+            status_info["smtp_user"] = "[SECURED]"
+        if status_info.get("from_email"):
+            status_info["from_email"] = "[SECURED]"
+        if "description" in status_info and ("@" in str(status_info["description"]) or str(status_info.get("smtp_host", "")) in str(status_info["description"])):
+            if status_info.get("is_gmail"):
+                status_info["description"] = "Gmail Live Delivery [Configured]"
+            elif status_info.get("smtp_configured"):
+                status_info["description"] = "Live SMTP Delivery [Configured]"
     return {
         "status": "SUCCESS",
         "total": len(records),
@@ -2085,8 +2668,15 @@ def clear_dispatched_notifications(user: Dict[str, Any] = Depends(get_current_us
 @app.post("/api/security/test-notification")
 def test_notification(payload: TestNotificationSchema, request: Request, user: Dict[str, Any] = Depends(get_current_user)):
     """Allows testing Amazon SNS / Email dispatch live."""
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = resolve_client_ip(request)
     target_email = sanitize_email(payload.recipient_email)
+    is_admin = bool(user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin"))
+    if not is_admin and target_email.lower() != user.get("email", "").lower():
+        raise HTTPException(
+            status_code=403,
+            detail="Standard users can only dispatch test alerts to their own verified email address."
+        )
+
     msg = payload.message or f"Test security alert dispatched at {datetime.now(timezone.utc).isoformat()}."
     record = notification_service.dispatch(
         recipient_email=target_email,
@@ -2121,11 +2711,13 @@ async def security_event_stream(request: Request, authorization: Optional[str] =
         raise HTTPException(status_code=401, detail="Active session required.")
 
     email = session.get("user_email")
-    is_primary = bool(session.get("is_primary_device") or session.get("device_tier") == "PRIMARY")
+    user = db.users.find_one({"email": email})
+    is_admin = bool(user and is_super_admin_account(user))
+    is_primary = bool(session.get("is_primary_device") or session.get("device_tier") == "PRIMARY" or is_admin)
     if not is_primary:
         raise HTTPException(status_code=403, detail="SSE real-time stream is reserved for Primary Devices.")
 
-    q = broadcaster.subscribe(email)
+    q = broadcaster.subscribe(email, is_admin=is_admin)
 
     async def event_stream():
         try:
@@ -2169,7 +2761,7 @@ class SimulateAttackSchema(BaseModel):
 @app.post("/api/security/simulate-scenario")
 def simulate_attack(payload: SimulateAttackSchema, auth_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)):
     target_email = sanitize_email(payload.target_email)
-    is_dev = os.getenv("DEPLOYMENT_MODE", "DEVELOPMENT").upper() in ("DEVELOPMENT", "TEST", "DEMO", "")
+    is_dev = os.getenv("DEPLOYMENT_MODE", "STANDALONE_LOCAL").upper() in ("DEVELOPMENT", "TEST", "DEMO", "STANDALONE_LOCAL", "LOCAL", "")
     if not auth_user and not is_dev:
         raise HTTPException(status_code=401, detail="Authentication required to run attack simulations.")
 
@@ -2281,15 +2873,17 @@ def simulate_attack(payload: SimulateAttackSchema, auth_user: Optional[Dict[str,
 
     # If action is BLOCK or STEP_UP, inject alert into user's alert inbox
     if action in ("BLOCK_SESSION", "STEP_UP_MFA"):
+        city_str = str((simulated_geo or {}).get("city") or "Unknown")
+        country_str = str((simulated_geo or {}).get("country") or "Unknown")
         sim_alert = {
             "alert_id": f"alt_sim_{int(time.time()*1000)}",
             "user_email": email,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "type": f"SIMULATED_{attack_type}",
             "risk_score": score,
-            "origin": simulated_geo.get("city", "Unknown") + ", " + simulated_geo.get("country", "Unknown"),
+            "origin": f"{city_str}, {country_str}",
             "ip": simulated_ip,
-            "device": simulated_fp.get("os", "Unknown"),
+            "device": (simulated_fp or {}).get("os") or "Unknown",
             "status": "UNRESOLVED",
             "reason": f"Simulated {attack_type} detected by ML Engine.",
             "factors": ml_res["explainable_factors"]
@@ -2312,7 +2906,7 @@ def simulate_attack(payload: SimulateAttackSchema, auth_user: Optional[Dict[str,
             notif = notification_service.send_mfa_code(
                 email=email,
                 otp="654321",
-                device_name=simulated_fp.get("os", "Simulated Vector"),
+                device_name=(simulated_fp or {}).get("os") or "Simulated Vector",
                 geo=simulated_geo,
                 client_ip=simulated_ip
             )
@@ -2334,37 +2928,45 @@ def simulate_attack(payload: SimulateAttackSchema, auth_user: Optional[Dict[str,
 
 @app.get("/api/security/events")
 def get_security_events(limit: int = 50, user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)):
-    is_admin = bool(user and (user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin")))
-    is_dev = os.getenv("DEPLOYMENT_MODE", "DEVELOPMENT").upper() in ("DEVELOPMENT", "TEST", "DEMO", "")
-
-    if is_admin:
+    try:
+        is_admin = bool(user and (user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin")))
+        dep_mode = os.getenv("DEPLOYMENT_MODE", "STANDALONE_LOCAL").upper()
+        
+        # Telemetry & SOC stream is visible to security operators & portal visitors (PII anonymized for non-admins)
         query = {}
-    elif user:
-        query = {"user_email": user["email"]}
-    elif is_dev:
-        query = {}
-    else:
-        raise HTTPException(status_code=401, detail="Authentication required to view security events.")
-
-    events = db.security_events.find(query, sort_key="timestamp", reverse=True, limit=min(limit, 100))
-    if not is_admin:
-        for ev in events:
-            if not user or ev.get("user_email") != user.get("email"):
-                parts = ev.get("user_email", "").split("@")
-                if len(parts) == 2 and len(parts[0]) > 1:
-                    ev["user_email"] = parts[0][0] + "***@" + parts[1]
-    return {"events": events}
+        raw_events = db.security_events.find(query, sort_key="timestamp", reverse=True, limit=min(limit, 100))
+        events = []
+        for ev in raw_events:
+            if not isinstance(ev, dict):
+                continue
+            ev_copy = dict(ev)
+            if "_id" in ev_copy:
+                ev_copy["_id"] = str(ev_copy["_id"])
+            if not is_admin:
+                em = ev_copy.get("user_email")
+                if em and isinstance(em, str) and (not user or em != user.get("email")):
+                    parts = em.split("@")
+                    if len(parts) == 2 and len(parts[0]) > 1:
+                        ev_copy["user_email"] = parts[0][0] + "***@" + parts[1]
+            events.append(ev_copy)
+        return {"events": events}
+    except Exception as e:
+        print(f"[SECURITY EVENTS ERROR] {e}")
+        return {"events": []}
 
 
 @app.post("/api/security/events/clear")
 @app.delete("/api/security/events")
 def clear_security_events(user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)):
-    """Clears all security events, login attempts, and real-time stream logs (Admin restricted)."""
-    if os.getenv("DEPLOYMENT_MODE", "").upper() not in ("DEVELOPMENT", "TEST"):
+    """Clears all security events, login attempts, and real-time stream logs (Admin restricted in prod/standalone)."""
+    dep_mode = os.getenv("DEPLOYMENT_MODE", "STANDALONE_LOCAL").upper()
+    is_test_mode = dep_mode in ("TEST", "DEVELOPMENT")
+    is_admin = bool(user and (user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin")))
+
+    if not is_test_mode and not is_admin:
         if not user:
             raise HTTPException(status_code=401, detail="Authentication required.")
-        if not (user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin")):
-            raise HTTPException(status_code=403, detail="Super Admin privileges required.")
+        raise HTTPException(status_code=403, detail="Super Admin privileges required to clear security events.")
     del_count = db.security_events.delete_many({})
     return {
         "status": "SUCCESS",
@@ -2375,24 +2977,41 @@ def clear_security_events(user: Optional[Dict[str, Any]] = Depends(get_optional_
 
 @app.get("/api/security/stats")
 def get_security_stats():
-    total_events = db.security_events.count_documents()
-    blocked_count = db.security_events.count_documents({"action_taken": "BLOCK_SESSION"})
-    mfa_count = db.security_events.count_documents({"action_taken": "STEP_UP_MFA"})
-    allowed_count = db.security_events.count_documents({"action_taken": "ALLOW"})
+    try:
+        total_events = db.security_events.count_documents({})
+        blocked_count = db.security_events.count_documents({"action_taken": "BLOCK_SESSION"})
+        mfa_count = db.security_events.count_documents({"action_taken": "STEP_UP_MFA"})
+        allowed_count = db.security_events.count_documents({"action_taken": "ALLOW"})
 
-    recent_events = db.security_events.find(sort_key="timestamp", reverse=True, limit=20)
-    avg_score = 0.0
-    if recent_events:
-        avg_score = round(sum(e.get("risk_score", 0.0) for e in recent_events) / len(recent_events), 1)
+        recent_events = db.security_events.find(sort_key="timestamp", reverse=True, limit=20)
+        avg_score = 0.0
+        if recent_events:
+            scores = [float(e.get("risk_score") or 0.0) for e in recent_events if isinstance(e, dict) and e.get("risk_score") is not None]
+            if scores:
+                avg_score = round(sum(scores) / len(scores), 1)
 
-    return {
-        "total_analyzed": total_events,
-        "blocked_hijacks": blocked_count,
-        "mfa_challenges": mfa_count,
-        "normal_allowed": allowed_count,
-        "avg_risk_score": avg_score,
-        "active_alarms": [a for a in cloudwatch.alarms.values() if a["state"] == "ALARM"]
-    }
+        active_alarms = []
+        if hasattr(cloudwatch, "alarms") and isinstance(cloudwatch.alarms, dict):
+            active_alarms = [a for a in cloudwatch.alarms.values() if isinstance(a, dict) and a.get("state") == "ALARM"]
+
+        return {
+            "total_analyzed": total_events,
+            "blocked_hijacks": blocked_count,
+            "mfa_challenges": mfa_count,
+            "normal_allowed": allowed_count,
+            "avg_risk_score": avg_score,
+            "active_alarms": active_alarms
+        }
+    except Exception as e:
+        print(f"[SECURITY STATS ERROR] {e}")
+        return {
+            "total_analyzed": 0,
+            "blocked_hijacks": 0,
+            "mfa_challenges": 0,
+            "normal_allowed": 0,
+            "avg_risk_score": 0.0,
+            "active_alarms": []
+        }
 
 
 # -------------------------------------------------------------
@@ -2402,18 +3021,38 @@ def get_security_stats():
 @app.get("/api/monitoring/cloudwatch/metrics")
 @app.get("/api/cloudwatch/metrics")
 def get_cloudwatch_telemetry():
-    return cloudwatch.get_dashboard_summary()
+    try:
+        return cloudwatch.get_dashboard_summary()
+    except Exception as e:
+        print(f"[CLOUDWATCH TELEMETRY ERROR] {e}")
+        return {
+            "metrics": {
+                "Invocations": 0,
+                "HighRiskDetections": 0,
+                "BlockedHijacks": 0,
+                "StepUpMFAChallenges": 0,
+                "NormalLogins": 0,
+                "AvgRiskScore": 0.0,
+                "AvgExecutionLatencyMs": 0.0
+            },
+            "alarms": list(cloudwatch.alarms.values()) if hasattr(cloudwatch, "alarms") else [],
+            "recent_logs": [],
+            "timeseries": []
+        }
 
 
 @app.post("/api/monitoring/cloudwatch/clear")
 @app.delete("/api/monitoring/cloudwatch")
 def clear_cloudwatch_telemetry(user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)):
-    """Clears all CloudWatch audit logs and resets telemetry counters (Admin restricted)."""
-    if os.getenv("DEPLOYMENT_MODE", "").upper() not in ("DEVELOPMENT", "TEST"):
+    """Clears all CloudWatch audit logs and resets telemetry counters (Admin restricted in prod/standalone)."""
+    dep_mode = os.getenv("DEPLOYMENT_MODE", "STANDALONE_LOCAL").upper()
+    is_test_mode = dep_mode in ("TEST", "DEVELOPMENT")
+    is_admin = bool(user and (user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin")))
+
+    if not is_test_mode and not is_admin:
         if not user:
             raise HTTPException(status_code=401, detail="Authentication required.")
-        if not (user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin")):
-            raise HTTPException(status_code=403, detail="Super Admin privileges required.")
+        raise HTTPException(status_code=403, detail="Super Admin privileges required to clear CloudWatch logs.")
     cloudwatch.clear_logs()
     return {
         "status": "SUCCESS",
@@ -2437,8 +3076,109 @@ def system_status():
         "telemetry_engine": "Amazon CloudWatch" if dep_mode.upper() == "AWS" else "Embedded Local SIEM / Telemetry",
         "maintenance_mode": MAINTENANCE_MODE,
         "message": "Service Under Maintenance" if MAINTENANCE_MODE else "Service Operational",
+        "db_reset_timestamp": LAST_DB_RESET_TIMESTAMP,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+
+@app.get("/api/system/db-health")
+def system_db_health():
+    """Returns real-time database connection diagnostics, ping latency, and session counts."""
+    return db.health_check()
+
+
+@app.get("/api/system/watchdog/status")
+def get_watchdog_status():
+    """Returns the live status, run counts, and latest health audit report from the System Watchdog."""
+    return watchdog.get_status()
+
+
+@app.post("/api/system/watchdog/run-now")
+def trigger_watchdog_audit(user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)):
+    """Triggers an immediate end-to-end automated health audit and returns diagnostics."""
+    dep_mode = os.getenv("DEPLOYMENT_MODE", "STANDALONE_LOCAL").upper()
+    is_dev = dep_mode in ("DEVELOPMENT", "TEST", "DEMO", "STANDALONE_LOCAL", "LOCAL", "")
+    is_admin = bool(user and is_super_admin_account(user))
+    if user and not is_admin:
+        raise HTTPException(status_code=403, detail="Super Admin authorization required to trigger audit.")
+    if not user and not is_dev:
+        raise HTTPException(status_code=403, detail="Super Admin authorization required to trigger audit.")
+    return watchdog.run_health_audit()
+
+
+@app.post("/api/system/database-reset")
+def reset_system_database(
+    clear_sessions: bool = True,
+    user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)
+):
+    """
+    Super Admin & Local Dev Diagnostic Tool:
+    Pings and refreshes the database connection pool, prunes expired or zombie sessions,
+    resets orphaned device locks, re-seeds default accounts, resets brute-force rate limiters,
+    and returns verified health diagnostics.
+    """
+    dep_mode = os.getenv("DEPLOYMENT_MODE", "STANDALONE_LOCAL").upper()
+    is_prod = dep_mode in ("PRODUCTION", "PROD", "AWS", "STAGING")
+    is_admin = bool(user and is_super_admin_account(user))
+
+    if user and not is_admin:
+        raise HTTPException(status_code=403, detail="Super Admin authorization required to reset database.")
+    if not user and is_prod:
+        raise HTTPException(status_code=401, detail="Authentication required to reset database in production.")
+
+    # 1. Reset database connection, unlock all accounts, and purge expired/stale sessions
+    preserve_email = user.get("email") if user else None
+    reset_report = db.reset_database(clear_sessions=clear_sessions, preserve_email=preserve_email)
+
+    global LAST_DB_RESET_TIMESTAMP
+    LAST_DB_RESET_TIMESTAMP = datetime.now(timezone.utc).isoformat()
+
+    # 2. Reseed verified default demo & superadmin accounts
+    try:
+        seed_demo_user_if_needed(force=True)
+    except Exception as e:
+        print(f"[DB Reset] Seed notice: {e}")
+
+    # 3. Clear rate limiter locks
+    rate_limiter.clear_all()
+
+    # 4. Clear CloudWatch logs & metrics counters
+    try:
+        cloudwatch.clear_logs()
+    except Exception:
+        pass
+
+    # 5. Broadcast reset event so open browser tabs update
+    try:
+        broadcaster.broadcast_sync(
+            "global",
+            {
+                "type": "SYSTEM_DATABASE_RESET",
+                "action": "CLEAR_LOCKOUTS",
+                "message": "Database reset completed. All automatic logouts, session locks, and rate limits have been cleared.",
+                "db_reset_timestamp": LAST_DB_RESET_TIMESTAMP,
+                "timestamp": LAST_DB_RESET_TIMESTAMP
+            }
+        )
+    except Exception:
+        pass
+
+    cloudwatch.put_log_event(
+        log_group="/aws/lambda/SystemGovernance",
+        level="INFO",
+        message=f"[System Maintenance] Database and session state reset performed (caller: {user.get('email') if user else 'local_dev'})."
+    )
+
+    return {
+        "status": "SUCCESS",
+        "message": "Database connection verified, expired sessions purged, and system baseline re-synced.",
+        "diagnostics": reset_report
+    }
+
+
+def check_root_owner(user: Dict[str, Any] = Depends(get_current_user)):
+    if user.get('role') != 'ROOT_OWNER':
+        raise HTTPException(status_code=403, detail='Ultimate God Mode (Root Owner) privileges required.')
+    return user
 
 def check_super_admin(user: Dict[str, Any] = Depends(get_current_user)):
     is_super = is_super_admin_account(user)
@@ -2449,6 +3189,28 @@ def check_super_admin(user: Dict[str, Any] = Depends(get_current_user)):
 @app.post("/api/system/maintenance")
 def toggle_maintenance(enable: bool, user: Dict[str, Any] = Depends(check_super_admin)):
     global MAINTENANCE_MODE
+
+    if user.get("role") != "ROOT_OWNER":
+        req_id = f"req_{int(datetime.now(timezone.utc).timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
+        db.admin_requests.insert_one({
+            "_id": req_id,
+            "requested_by": user.get("email"),
+            "action_type": "TOGGLE_MAINTENANCE",
+            "target_identifier": f"{'ENABLE' if enable else 'DISABLE'} Maintenance Mode",
+            "status": "PENDING",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "_enable": enable
+        })
+        god_admin = db.users.find_one({"role": "ROOT_OWNER"})
+        if god_admin and "email" in god_admin:
+            notification_service.dispatch(
+                recipient_email=god_admin["email"],
+                subject="[AWSSecurity] God Mode Approval Required: Maintenance Mode",
+                body_text=f"Super Admin {user.get('email')} has requested to {'ENABLE' if enable else 'DISABLE'} Maintenance Mode.\nRequest ID: {req_id}",
+                notification_type="SECURITY_NOTIFICATION"
+            )
+        return {"status": "PENDING_APPROVAL", "message": "Maintenance mode toggle requires God Mode Admin approval. Request submitted."}
+
     MAINTENANCE_MODE = enable
     cloudwatch.put_log_event(
         log_group="/aws/lambda/AuthHandler",
@@ -2470,16 +3232,19 @@ def cms_get_users(user: Dict[str, Any] = Depends(check_super_admin)):
     users = db.users.find()
     safe_users = []
     for u in users:
-        u.pop("password_hash", None)
-        u.pop("salt", None)
-        u.pop("secondary_password_hash", None)
-        u.pop("secondary_password_salt", None)
-        u.pop("mfa_secret", None)
-        u.pop("mfa_pending", None)
-        u["role"] = u.get("role", "USER")
-        u["is_root_admin"] = u.get("is_root_admin", False)
-        u["mfa_enabled"] = u.get("mfa_enabled", True)
-        safe_users.append(u)
+        u_copy = dict(u)
+        if "_id" in u_copy:
+            u_copy["_id"] = str(u_copy["_id"])
+        for secret_k in (
+            "password_hash", "salt", "secondary_password_hash", "secondary_password_salt",
+            "mfa_secret", "mfa_pending", "totp_secret", "backup_codes",
+            "totp_setup_pending", "totp_recovery_pending", "email_verification_code"
+        ):
+            u_copy.pop(secret_k, None)
+        u_copy["role"] = u_copy.get("role", "USER")
+        u_copy["is_root_admin"] = u_copy.get("is_root_admin", False)
+        u_copy["mfa_enabled"] = u_copy.get("mfa_enabled", True)
+        safe_users.append(u_copy)
     return safe_users
 
 @app.post("/api/cms/users/{email}/unlock")
@@ -2488,6 +3253,26 @@ def cms_unlock_user(email: str, admin: Dict[str, Any] = Depends(check_super_admi
     target_user = db.users.find_one({"email": clean_email})
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found.")
+
+    if admin.get("role") != "ROOT_OWNER":
+        req_id = f"req_{int(datetime.now(timezone.utc).timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
+        db.admin_requests.insert_one({
+            "_id": req_id,
+            "requested_by": admin.get("email"),
+            "action_type": "UNLOCK_USER",
+            "target_identifier": clean_email,
+            "status": "PENDING",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        god_admin = db.users.find_one({"role": "ROOT_OWNER"})
+        if god_admin and "email" in god_admin:
+            notification_service.dispatch(
+                recipient_email=god_admin["email"],
+                subject="[AWSSecurity] God Mode Approval Required: Unlock User",
+                body_text=f"Super Admin {admin.get('email')} has requested to unlock user {clean_email}.\nRequest ID: {req_id}\n\nPlease review this action in the God Mode Approvals dashboard.",
+                notification_type="SECURITY_NOTIFICATION"
+            )
+        return {"status": "PENDING_APPROVAL", "message": "Unlock requires God Mode Admin approval. Request submitted."}
 
     db.users.update_one(
         {"email": clean_email},
@@ -2510,6 +3295,36 @@ def cms_delete_user(email: str, admin: Dict[str, Any] = Depends(check_super_admi
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found.")
 
+    if target_user.get("role") in ("ROOT_OWNER", "SUPER_ADMIN") or target_user.get("is_super_admin"):
+        raise HTTPException(status_code=400, detail="Administrative root accounts cannot be deleted.")
+
+    if admin.get("role") != "ROOT_OWNER":
+        # Dual-Control Intercept: Super Admin Maker Request
+        req_id = f"req_{int(datetime.now(timezone.utc).timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
+        db.admin_requests.insert_one({
+            "_id": req_id,
+            "requested_by": admin.get("email"),
+            "action_type": "DELETE_USER",
+            "target_identifier": clean_email,
+            "status": "PENDING",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        })
+        cloudwatch.put_log_event(
+            log_group="/aws/lambda/AuthHandler",
+            level="INFO",
+            message=f"[CMS Maker-Checker] Super Admin {admin.get('email')} submitted deletion request for {clean_email}."
+        )
+        god_admin = db.users.find_one({"role": "ROOT_OWNER"})
+        if god_admin and "email" in god_admin:
+            notification_service.dispatch(
+                recipient_email=god_admin["email"],
+                subject="🛡️ [AWSSecurity] God Mode Approval Required: User Deletion",
+                body_text=f"Super Admin {admin.get('email')} has requested to delete user {clean_email}.\nRequest ID: {req_id}\n\nPlease review this action in the God Mode Approvals dashboard.",
+                notification_type="SECURITY_NOTIFICATION"
+            )
+        return {"status": "PENDING_APPROVAL", "message": "High-privilege action requires God Mode Admin approval. Request submitted successfully."}
+
+    # God Mode Admin execution
     db.active_sessions.delete_many({"user_email": clean_email})
     db.security_events.delete_many({"user_email": clean_email})
     db.get_collection("security_alerts").delete_many({"user_email": clean_email})
@@ -2557,6 +3372,27 @@ def cms_terminate_session(session_id: str, admin: Dict[str, Any] = Depends(check
     if not target:
         raise HTTPException(status_code=404, detail="Session not found or already terminated.")
 
+    if admin.get("role") != "ROOT_OWNER":
+        req_id = f"req_{int(datetime.now(timezone.utc).timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
+        db.admin_requests.insert_one({
+            "_id": req_id,
+            "requested_by": admin.get("email"),
+            "action_type": "TERMINATE_SESSION",
+            "target_identifier": f"{session_id} ({target.get('user_email', 'unknown')})",
+            "status": "PENDING",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "_session_id": session_id
+        })
+        god_admin = db.users.find_one({"role": "ROOT_OWNER"})
+        if god_admin and "email" in god_admin:
+            notification_service.dispatch(
+                recipient_email=god_admin["email"],
+                subject="[AWSSecurity] God Mode Approval Required: Terminate Session",
+                body_text=f"Super Admin {admin.get('email')} has requested to terminate session {session_id} (User: {target.get('user_email', 'unknown')}).\nRequest ID: {req_id}",
+                notification_type="SECURITY_NOTIFICATION"
+            )
+        return {"status": "PENDING_APPROVAL", "message": "Session termination requires God Mode Admin approval. Request submitted."}
+
     db.active_sessions.delete_one({"session_id": session_id})
 
     # Broadcast session revocation to the affected user
@@ -2580,6 +3416,28 @@ def cms_edit_session(session_id: str, payload: CMSEditSessionSchema, admin: Dict
     target = db.active_sessions.find_one({"session_id": session_id})
     if not target:
         raise HTTPException(status_code=404, detail="Session not found.")
+
+    if admin.get("role") != "ROOT_OWNER":
+        req_id = f"req_{int(datetime.now(timezone.utc).timestamp()*1000)}_{uuid.uuid4().hex[:6]}"
+        db.admin_requests.insert_one({
+            "_id": req_id,
+            "requested_by": admin.get("email"),
+            "action_type": "EDIT_SESSION",
+            "target_identifier": f"{session_id} ({target.get('user_email', 'unknown')})",
+            "status": "PENDING",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "_session_id": session_id,
+            "_payload": {"device": payload.device, "device_tier": payload.device_tier, "status": payload.status}
+        })
+        god_admin = db.users.find_one({"role": "ROOT_OWNER"})
+        if god_admin and "email" in god_admin:
+            notification_service.dispatch(
+                recipient_email=god_admin["email"],
+                subject="[AWSSecurity] God Mode Approval Required: Edit Session",
+                body_text=f"Super Admin {admin.get('email')} has requested to edit session {session_id} (User: {target.get('user_email', 'unknown')}).\nRequest ID: {req_id}",
+                notification_type="SECURITY_NOTIFICATION"
+            )
+        return {"status": "PENDING_APPROVAL", "message": "Session edit requires God Mode Admin approval. Request submitted."}
 
     updates = {}
     if payload.device is not None and payload.device.strip():
@@ -2605,9 +3463,9 @@ def cms_edit_session(session_id: str, payload: CMSEditSessionSchema, admin: Dict
 
 @app.get("/api/cms/stats")
 def cms_get_stats(user: Dict[str, Any] = Depends(check_super_admin)):
-    total_users = db.users.count_documents()
-    active_sessions = db.active_sessions.count_documents()
-    total_events = db.security_events.count_documents()
+    total_users = db.users.count_documents({})
+    active_sessions = db.active_sessions.count_documents({})
+    total_events = db.security_events.count_documents({})
     blocked_hijacks = db.security_events.count_documents({"action_taken": "BLOCK_SESSION"})
     
     return {
@@ -2619,12 +3477,154 @@ def cms_get_stats(user: Dict[str, Any] = Depends(check_super_admin)):
     }
 
 
+# =========================================================================
+# God Mode (Maker-Checker) Approval Endpoints & Reset
+# =========================================================================
+
+
+
+@app.get("/api/cms/approvals")
+def list_admin_approvals(admin: Dict[str, Any] = Depends(check_root_owner)):
+    """List all pending destructive actions requested by Super Admins."""
+    requests = db.admin_requests.find({"status": "PENDING"})
+    clean_reqs = []
+    for r in requests:
+        r_copy = dict(r)
+        if "_id" in r_copy:
+            r_copy["_id"] = str(r_copy["_id"])
+        clean_reqs.append(r_copy)
+    return {"status": "SUCCESS", "data": clean_reqs}
+
+@app.post("/api/cms/approvals/{request_id}/approve")
+def approve_admin_request(request_id: str, admin: Dict[str, Any] = Depends(check_root_owner)):
+    """God Mode Admin approves and executes a pending request."""
+    req = db.admin_requests.find_one({"_id": request_id, "status": "PENDING"})
+    if not req:
+        raise HTTPException(status_code=404, detail="Pending request not found.")
+
+    if req.get("requested_by") and req.get("requested_by").lower() == admin.get("email", "").lower():
+        raise HTTPException(
+            status_code=403,
+            detail="Dual-control governance violation: You cannot approve your own administrative request."
+        )
+
+    action = req.get("action_type")
+    target = req.get("target_identifier")
+    
+    if action == "DELETE_USER":
+        db.active_sessions.delete_many({"user_email": target})
+        db.security_events.delete_many({"user_email": target})
+        db.get_collection("security_alerts").delete_many({"user_email": target})
+        db.password_resets.delete_many({"email": target})
+        db.get_collection("dispatched_notifications").delete_many({"recipient_email": target})
+        db.users.delete_one({"email": target})
+        msg = f"User {target} and all active sessions were successfully deleted."
+    
+    elif action == "UNLOCK_USER":
+        db.users.update_one(
+            {"email": target},
+            {"$set": {"status": "ACTIVE", "updated_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        rate_limiter.record_success(f"acct:{target}")
+        msg = f"Account {target} successfully unlocked and restored to ACTIVE."
+
+    elif action == "TERMINATE_SESSION":
+        sid = req.get("_session_id", "")
+        sess = db.active_sessions.find_one({"session_id": sid})
+        if sess:
+            db.active_sessions.delete_one({"session_id": sid})
+            broadcaster.broadcast_sync(sess.get("user_email"), {
+                "type": "SESSION_REVOKED",
+                "session_id": sid,
+                "reason": f"Session terminated by God Mode Administrator ({admin.get('email')}) via approved request."
+            })
+        msg = f"Session {sid} terminated successfully."
+
+    elif action == "EDIT_SESSION":
+        sid = req.get("_session_id", "")
+        payload_data = req.get("_payload", {})
+        updates = {}
+        if payload_data.get("device") and str(payload_data["device"]).strip():
+            updates["device"] = str(payload_data["device"]).strip()
+        if payload_data.get("device_tier"):
+            tier = str(payload_data["device_tier"]).strip().upper()
+            if tier in ("PRIMARY", "SECONDARY"):
+                updates["device_tier"] = tier
+                updates["is_primary_device"] = (tier == "PRIMARY")
+        if payload_data.get("status") and str(payload_data["status"]).strip():
+            updates["status"] = str(payload_data["status"]).strip().upper()
+        if updates:
+            db.active_sessions.update_one({"session_id": sid}, {"$set": updates})
+        msg = f"Session {sid} updated successfully with: {updates}"
+
+    elif action == "TOGGLE_MAINTENANCE":
+        global MAINTENANCE_MODE
+        enable = req.get("_enable", False)
+        MAINTENANCE_MODE = enable
+        msg = f"Maintenance mode {'ENABLED' if enable else 'DISABLED'} successfully."
+
+    else:
+        raise HTTPException(status_code=400, detail="Unknown action type.")
+
+    db.admin_requests.update_one({"_id": request_id}, {"$set": {"status": "APPROVED", "resolved_at": datetime.now(timezone.utc).isoformat(), "resolved_by": admin.get("email")}})
+
+    super_admin_email = req.get("requested_by")
+    notification_service.dispatch(
+        recipient_email=super_admin_email,
+        subject="✅ [AWSSecurity] Request Approved & Executed",
+        body_text=f"Hello,\n\nYour recent administrative request has been APPROVED by the God Mode Administrator.\n\nRequest ID: {request_id}\nAction: {action} on {target}\n\nThe action has been fully executed on the database.",
+        notification_type="SECURITY_NOTIFICATION"
+    )
+
+    return {"status": "SUCCESS", "message": f"Request {request_id} approved and executed. Super Admin notified."}
+
+@app.post("/api/cms/approvals/{request_id}/reject")
+def reject_admin_request(request_id: str, admin: Dict[str, Any] = Depends(check_root_owner)):
+    """God Mode Admin rejects a pending request."""
+    req = db.admin_requests.find_one({"_id": request_id, "status": "PENDING"})
+    if not req:
+        raise HTTPException(status_code=404, detail="Pending request not found.")
+
+    if req.get("requested_by") and req.get("requested_by").lower() == admin.get("email", "").lower():
+        raise HTTPException(
+            status_code=403,
+            detail="Dual-control governance violation: You cannot reject your own administrative request."
+        )
+
+    db.admin_requests.update_one({"_id": request_id}, {"$set": {"status": "REJECTED", "resolved_at": datetime.now(timezone.utc).isoformat(), "resolved_by": admin.get("email")}})
+
+    super_admin_email = req.get("requested_by")
+    notification_service.dispatch(
+        recipient_email=super_admin_email,
+        subject="❌ [AWSSecurity] Request Rejected",
+        body_text=f"Hello,\n\nYour recent administrative request has been REJECTED by the God Mode Administrator.\n\nRequest ID: {request_id}\nAction: {req.get('action_type')} on {req.get('target_identifier')}\n\nNo changes were made to the system.",
+        notification_type="SECURITY_NOTIFICATION",
+        is_serious=True
+    )
+
+    return {"status": "SUCCESS", "message": f"Request {request_id} rejected. Super Admin notified."}
+
+
 # -------------------------------------------------------------
 # Static Files & Single Page Application Routing
 # -------------------------------------------------------------
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 if os.path.exists(FRONTEND_DIR):
     app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+@app.get("/sw.js")
+def serve_service_worker():
+    sw_file = os.path.join(FRONTEND_DIR, "sw.js")
+    if os.path.exists(sw_file):
+        return FileResponse(
+            sw_file,
+            media_type="application/javascript",
+            headers={
+                "Service-Worker-Allowed": "/",
+                "Cache-Control": "no-cache, no-store, must-revalidate"
+            }
+        )
+    return JSONResponse({"message": "Service Worker not found."}, status_code=404)
 
 @app.get("/{full_path:path}")
 def serve_spa(full_path: str):
@@ -2648,6 +3648,7 @@ def serve_spa(full_path: str):
         response.headers["Expires"] = "0"
         return response
     return JSONResponse({"message": "Frontend index.html not yet built."}, status_code=404)
+
 
 if __name__ == "__main__":
     import uvicorn

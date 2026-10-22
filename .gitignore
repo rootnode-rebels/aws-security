@@ -1,7 +1,11 @@
 # Environments
 .env
 .env.*
-!.env.example
+*.env
+!*.env.example
+atlas-credentials.env
+temp_source_config.json
+apprunner-*.json
 *.exe
 .venv
 venv/
@@ -10,6 +14,7 @@ ENV/
 
 # Python
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *$py.class
 *.so
@@ -57,4 +62,6 @@ test_results.txt
 docs_extracted.txt
 docs_full.txt
 .gitignore-antigravity
+check_roles.py
+*.docx
 

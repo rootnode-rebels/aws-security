@@ -12,20 +12,28 @@ WORKDIR /app
 # Install curl for healthchecks
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
-# Copy installed python dependencies from builder
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
+# Create non-root system user
+RUN useradd -m -u 1000 appuser
+
+# Copy installed python dependencies from builder to appuser
+COPY --from=builder /root/.local /home/appuser/.local
+ENV PATH=/home/appuser/.local/bin:$PATH
 
 # Copy application code
 COPY backend/ ./backend/
 COPY database/ ./database/
+COPY data/ ./data/
 COPY frontend/ ./frontend/
 COPY run_standalone.py .
+
+RUN chown -R appuser:appuser /app /home/appuser
 
 # Environment settings for AWS production
 ENV DEPLOYMENT_MODE="AWS_ECS_PROD"
 ENV PORT=8000
 ENV HOST="0.0.0.0"
+
+USER appuser
 
 EXPOSE 8000
 

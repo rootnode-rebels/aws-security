@@ -131,13 +131,22 @@ async function apiFetch(endpoint, options = {}) {
 
     // Handle 401 Session Expired / Revoked
     if (res.status === 401 && AppState.token) {
-      const isPrimaryDev = (AppState.user && AppState.user.is_primary_device !== false && AppState.user.device_tier !== "SECONDARY") || localStorage.getItem("is_primary_device") === "true";
-      if (isPrimaryDev) {
-        console.warn("[Session] Primary device session preserved against transient 401.");
+      // Definitively expired on identity verification or administrative routes
+      if (endpoint === "/api/auth/me" || endpoint.startsWith("/api/cms/")) {
+        console.warn("[Session] Authentication session expired or revoked in database.");
+        handleSessionExpired();
         return { ok: false, status: 401, error: "Unauthorized" };
       }
-      handleSessionExpired();
-      throw new Error("Session expired");
+      // For background telemetry/metrics, track consecutive failures
+      window._consecutive401s = (window._consecutive401s || 0) + 1;
+      if (window._consecutive401s >= 3) {
+        window._consecutive401s = 0;
+        console.warn("[Session] Consecutive 401 responses encountered. Prompting sign in.");
+        handleSessionExpired();
+      }
+      return { ok: false, status: 401, error: "Unauthorized" };
+    } else if (res.ok) {
+      window._consecutive401s = 0;
     }
 
     // Handle 403 Access Blocked / Account Locked
@@ -404,6 +413,21 @@ function handleSessionExpired() {
   renderUserPortal();
 }
 
+// Auto-Wakeup on Tab Return / Computer Sleep Wake
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    if (AppState.token && typeof checkCurrentUser === "function") {
+      checkCurrentUser();
+    }
+    if (AppState.currentTab === "cms-dashboard" && typeof cmsLoadData === "function") {
+      cmsLoadData();
+    }
+    if (AppState.currentTab === "soc-dashboard" && typeof loadSocMetrics === "function") {
+      loadSocMetrics();
+    }
+  }
+});
+
 // Offline State Detector
 window.addEventListener("online", () => {
   AppState.isOffline = false;
@@ -539,6 +563,8 @@ function applyMaintenanceState(isMaint) {
 }
 window.applyMaintenanceState = applyMaintenanceState;
 
+let lastSystemResetTimestamp = null;
+
 async function syncSystemStatus() {
   try {
     const res = await fetch("/api/system/status");
@@ -547,6 +573,15 @@ async function syncSystemStatus() {
       const isMaint = !!data.maintenance_mode;
       if (lastMaintenanceState !== isMaint) {
         applyMaintenanceState(isMaint);
+      }
+      if (data.db_reset_timestamp) {
+        if (lastSystemResetTimestamp && lastSystemResetTimestamp !== data.db_reset_timestamp) {
+          // Automatic DB reset detected: clear all lockouts and expired session modals immediately!
+          closeModal("modal-account-locked");
+          closeModal("modal-session-expired");
+          if (typeof renderUserPortal === "function") renderUserPortal();
+        }
+        lastSystemResetTimestamp = data.db_reset_timestamp;
       }
     }
   } catch (err) {
@@ -614,25 +649,34 @@ const SUPER_ADMIN_CONFIG = {
     "superadmin@awssecurity.io",
     ...(JSON.parse(localStorage.getItem("super_admin_emails") || "[]"))
   ],
-  roles: ["SUPER_ADMIN"],
+  roles: ["SUPER_ADMIN", "ROOT_OWNER", "ROOT_ADMIN"],
   passwords: [] // Kept confidential under admin
 };
 window.SUPER_ADMIN_CONFIG = SUPER_ADMIN_CONFIG;
 
 function isSuperAdmin(user = AppState.user) {
   if (!user) return false;
-  // Check explicit super admin flag
-  if (user.is_super_admin === true) return true;
+  // Check explicit super admin flag or root admin flag
+  if (user.is_super_admin === true || user.is_root_admin === true || user.is_root_owner === true) return true;
   const userEmail = (user.email || "").toLowerCase().trim();
   if (userEmail && SUPER_ADMIN_CONFIG.emails.some(e => e.toLowerCase().trim() === userEmail)) {
     return true;
   }
-  if (user.role && SUPER_ADMIN_CONFIG.roles.includes(String(user.role).toUpperCase().trim())) {
+  const role = String(user.role || "").toUpperCase().trim();
+  if (role && SUPER_ADMIN_CONFIG.roles.includes(role)) {
     return true;
   }
   return false;
 }
 window.isSuperAdmin = isSuperAdmin;
+
+function isRootOwner(user = AppState.user) {
+  if (!user) return false;
+  if (user.is_root_owner === true) return true;
+  const role = String(user.role || "").toUpperCase().trim();
+  return role === "ROOT_OWNER";
+}
+window.isRootOwner = isRootOwner;
 
 // Helper to easily register/change super admin email at runtime or from console:
 window.setSuperAdminEmail = function(email) {
@@ -796,6 +840,7 @@ window.addEventListener("scroll", () => {
 
 // Initialize features on load
 document.addEventListener("DOMContentLoaded", () => {
+  initTheme(); // Sync theme icons once DOM is ready
   setTimeout(() => {
     if (!localStorage.getItem("cookies_accepted")) {
       const banner = document.getElementById("cookie-banner");
@@ -907,4 +952,26 @@ async function submitEmailVerification(e) {
     showToast(res.data?.detail || "Invalid verification code.", "error");
   }
 }
+
+// ============================================================================
+// QUICK DATABASE RECONNECT & SESSION RE-SYNC
+// ============================================================================
+async function quickResetDatabase() {
+  showToast("Re-syncing database link and purging expired sessions...", "info");
+  try {
+    const res = await apiFetch("/api/system/database-reset", { method: "POST" });
+    if (res.ok && res.data) {
+      const diag = res.data.diagnostics || {};
+      showToast(`Database re-synced! ${diag.pruned_sessions || 0} expired sessions pruned.`, "success");
+      if (typeof checkCurrentUser === "function") {
+        await checkCurrentUser();
+      }
+    } else {
+      showToast(res.data?.detail || "Database reset failed.", "error");
+    }
+  } catch (err) {
+    showToast(`Database reset error: ${err.message}`, "error");
+  }
+}
+window.quickResetDatabase = quickResetDatabase;
 

@@ -22,6 +22,16 @@ async function checkCurrentUser() {
     loadUserSessions(true);
     loadUserAlerts();
     
+    if (res.data.require_password_change) {
+      if (typeof openModal === "function") {
+        openModal("modal-reset-password");
+        if (typeof switchPasswordMode === "function") {
+          switchPasswordMode("auth");
+        }
+        showToast("⚠️ Security Notice: Mandatory password update required for your account.", "warning");
+      }
+    }
+    
     // Launch background worker, real-time SSE stream, and notification permissions
     startBackgroundTimerWorker();
     connectSecurityStream();
@@ -122,9 +132,14 @@ function renderUserPortal() {
     }
 
     const roleBadge = document.getElementById("user-role-badge");
-    const isSuper = (typeof isSuperAdmin === "function") ? isSuperAdmin(AppState.user) : (AppState.user.is_super_admin || AppState.user.role === "SUPER_ADMIN");
+    const isRoot = (typeof isRootOwner === "function") ? isRootOwner(AppState.user) : (AppState.user && (AppState.user.role === "ROOT_OWNER" || AppState.user.is_root_owner));
+    const isSuper = (typeof isSuperAdmin === "function") ? isSuperAdmin(AppState.user) : (AppState.user && (AppState.user.is_super_admin || AppState.user.role === "SUPER_ADMIN"));
     if (roleBadge) {
-      if (isSuper) {
+      if (isRoot) {
+        roleBadge.style.display = "inline-flex";
+        roleBadge.className = "capsule-badge capsule-amber font-mono";
+        roleBadge.innerHTML = '<span class="pulse-dot pulse-dot-amber"></span>👑 GOD MODE ADMIN';
+      } else if (isSuper) {
         roleBadge.style.display = "inline-flex";
         roleBadge.className = "capsule-badge capsule-amber font-mono";
         roleBadge.innerHTML = '<span class="pulse-dot pulse-dot-amber"></span>👑 SUPER ADMIN';
@@ -223,6 +238,39 @@ function renderUserPortal() {
         `;
       }
     }
+
+    // Update TOTP Authenticator UI elements
+    const totpBadge = document.getElementById("user-totp-badge");
+    const totpDot = document.getElementById("user-totp-dot");
+    const totpLabel = document.getElementById("user-totp-label");
+    const totpPill = document.getElementById("totp-status-pill");
+    const totpDesc = document.getElementById("totp-status-desc");
+    const btnTotpToggle = document.getElementById("btn-totp-toggle");
+
+    const isTotpEnabled = Boolean(AppState.user.totp_enabled);
+    if (totpLabel) totpLabel.textContent = isTotpEnabled ? "2FA: ACTIVE" : "2FA: OFF";
+    if (totpDot) {
+      totpDot.className = `pulse-dot ${isTotpEnabled ? 'pulse-dot-emerald' : 'pulse-dot-silver'}`;
+    }
+    if (totpBadge) {
+      totpBadge.title = isTotpEnabled 
+        ? "Authenticator App 2FA is Active (Click to manage)" 
+        : "Authenticator App 2FA is Disabled (Click to setup)";
+    }
+    if (totpPill) {
+      totpPill.textContent = isTotpEnabled ? "ENABLED" : "OFF";
+      totpPill.className = `capsule-badge ${isTotpEnabled ? 'capsule-emerald' : 'capsule-silver'}`;
+    }
+    if (totpDesc) {
+      totpDesc.textContent = isTotpEnabled
+        ? "Active • Ready for instant account recovery on failed logins"
+        : "Google / Microsoft / Apple Authenticator for instant recovery";
+    }
+    if (btnTotpToggle) {
+      btnTotpToggle.innerHTML = isTotpEnabled 
+        ? '<span class="material-symbols-outlined" style="font-size: 0.9rem;">verified_user</span><span>Manage 2FA</span>' 
+        : '<span>⚙️ Setup 2FA</span>';
+    }
   }
 }
 
@@ -265,6 +313,10 @@ function checkPasswordStrength(password) {
 
 // Auth Tab Switcher
 function switchAuthTab(mode) {
+  if (typeof closeModal === "function") {
+    closeModal("modal-account-locked");
+    closeModal("modal-session-expired");
+  }
   const loginForm = document.getElementById("form-login");
   const regForm = document.getElementById("form-register");
   const btnLogin = document.getElementById("auth-tab-login");
@@ -524,6 +576,11 @@ async function handleLogin(e, terminateOthers = false) {
       return;
     }
 
+    if (res.data.status === "TOTP_RECOVERY_REQUIRED") {
+      openTOTPRecoveryModal(res.data);
+      return;
+    }
+
     if (res.data.status === "MFA_REQUIRED") {
       // Step-Up / Secondary Device MFA Challenge
       document.getElementById("mfa-email-hidden").value = email;
@@ -601,9 +658,15 @@ async function handleLogin(e, terminateOthers = false) {
 
     await checkCurrentUser();
   } else {
+    if (res.data?.status === "TOTP_RECOVERY_REQUIRED") {
+      openTOTPRecoveryModal(res.data);
+      return;
+    }
     if (res.status === 403) {
       showToast("🚨 Sign-in blocked: Unusual or suspicious location detected.", "error");
       playSecurityAlertSound();
+    } else if (res.status === 429) {
+      showToast(res.data?.detail || "Too many failed login attempts. Access temporarily restricted.", "warning");
     } else if (res.status === 500) {
       showToast("Server error during sign-in. Please try again or check server logs.", "error");
     } else {
@@ -611,6 +674,216 @@ async function handleLogin(e, terminateOthers = false) {
     }
   }
 }
+
+// -------------------------------------------------------------
+// TOTP Authenticator 2FA Controller & Adaptive Recovery
+// -------------------------------------------------------------
+function openTOTPRecoveryModal(data) {
+  const emailHidden = document.getElementById("totp-recovery-email-hidden");
+  const tokenHidden = document.getElementById("totp-recovery-temp-token-hidden");
+  const codeInput = document.getElementById("totp-recovery-code-input");
+  const desc = document.getElementById("totp-recovery-desc");
+  const triesLabel = document.getElementById("totp-recovery-tries-label");
+
+  if (emailHidden) emailHidden.value = data.email || "";
+  if (tokenHidden) tokenHidden.value = data.temp_token || "";
+  if (codeInput) {
+    codeInput.value = "";
+    setTimeout(() => codeInput.focus(), 150);
+  }
+  if (desc && data.message) {
+    desc.textContent = data.message;
+  }
+  if (triesLabel) {
+    triesLabel.textContent = "Max 3 recovery verification attempts allowed.";
+    triesLabel.style.color = "var(--text-muted)";
+  }
+  openModal("modal-totp-recovery");
+  showToast("Repeated failed attempts: Authenticator 2FA recovery challenge initiated.", "warning");
+}
+window.openTOTPRecoveryModal = openTOTPRecoveryModal;
+
+async function handleVerifyTOTPRecovery(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const email = document.getElementById("totp-recovery-email-hidden").value.trim();
+  const temp_token = document.getElementById("totp-recovery-temp-token-hidden").value;
+  const totp_code = document.getElementById("totp-recovery-code-input").value.trim();
+
+  if (!totp_code) {
+    showToast("Please enter the 6-digit code or emergency backup code.", "warning");
+    return;
+  }
+
+  const res = await apiFetch("/api/auth/totp/verify-recovery", {
+    method: "POST",
+    body: JSON.stringify({ email, temp_token, totp_code })
+  });
+
+  if (res.ok && res.data) {
+    closeModal("modal-totp-recovery");
+    AppState.token = res.data.token;
+    localStorage.setItem("cyber_token", res.data.token);
+    showToast("Identity verified via Authenticator 2FA! Access restored.", "success");
+    await checkCurrentUser();
+
+    if (res.data.prompt_password_reset) {
+      setTimeout(() => {
+        showToast("💡 Recommended: If you forgot your password, please update it now in Security Settings.", "info");
+      }, 1500);
+    }
+  } else {
+    const errorMsg = res.data?.detail || res.error || "Invalid authenticator code. Please try again.";
+    showToast(errorMsg, "error");
+    const triesLabel = document.getElementById("totp-recovery-tries-label");
+    if (triesLabel && typeof errorMsg === "string" && errorMsg.includes("remaining")) {
+      triesLabel.textContent = errorMsg;
+      triesLabel.style.color = "#f87171";
+    }
+  }
+}
+window.handleVerifyTOTPRecovery = handleVerifyTOTPRecovery;
+
+async function openTOTPSetup() {
+  if (!AppState.token) {
+    showToast("Please log in to configure 2FA.", "warning");
+    return;
+  }
+
+  showToast("Generating Authenticator setup key & QR code...", "info");
+  const res = await apiFetch("/api/auth/totp/setup-init", { method: "POST" });
+  if (res.ok && res.data) {
+    const qrContainer = document.getElementById("totp-qr-container");
+    const secretDisplay = document.getElementById("totp-secret-key-display");
+    const tokenHidden = document.getElementById("totp-setup-token-hidden");
+    const backupGrid = document.getElementById("totp-backup-codes-grid");
+    const codeInput = document.getElementById("totp-setup-code-input");
+
+    if (qrContainer) {
+      qrContainer.innerHTML = res.data.qr_svg;
+    }
+    if (secretDisplay) {
+      secretDisplay.textContent = res.data.secret;
+    }
+    if (tokenHidden) {
+      tokenHidden.value = res.data.setup_token;
+    }
+    if (codeInput) {
+      codeInput.value = "";
+    }
+
+    if (backupGrid && Array.isArray(res.data.backup_codes)) {
+      window._currentBackupCodes = res.data.backup_codes;
+      backupGrid.innerHTML = res.data.backup_codes.map(code => 
+        `<div style="background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); padding: 0.35rem; border-radius: 4px; color: #fde68a;"><code>${code}</code></div>`
+      ).join("");
+    }
+
+    openModal("modal-totp-setup");
+  } else {
+    showToast(res.data?.detail || "Failed to initialize Authenticator 2FA setup.", "error");
+  }
+}
+window.openTOTPSetup = openTOTPSetup;
+
+async function handleTOTPSetupVerify(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const setup_token = document.getElementById("totp-setup-token-hidden").value;
+  const code = document.getElementById("totp-setup-code-input").value.trim();
+
+  if (!code || code.length !== 6) {
+    showToast("Please enter the 6-digit code displayed in your Authenticator app.", "warning");
+    return;
+  }
+
+  const res = await apiFetch("/api/auth/totp/setup-verify", {
+    method: "POST",
+    body: JSON.stringify({ setup_token, code })
+  });
+
+  if (res.ok) {
+    closeModal("modal-totp-setup");
+    showToast("🎉 Authenticator App 2FA successfully activated!", "success");
+    if (AppState.user) {
+      AppState.user.totp_enabled = true;
+    }
+    await checkCurrentUser();
+  } else {
+    showToast(res.data?.detail || "Invalid code. Please ensure your device clock is accurate and try again.", "error");
+  }
+}
+window.handleTOTPSetupVerify = handleTOTPSetupVerify;
+
+async function handleTOTPDisable(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const password = document.getElementById("totp-disable-password").value;
+  if (!password) {
+    showToast("Master password is required to disable 2FA.", "warning");
+    return;
+  }
+
+  const res = await apiFetch("/api/auth/totp/disable", {
+    method: "POST",
+    body: JSON.stringify({ current_password: password })
+  });
+
+  if (res.ok) {
+    closeModal("modal-totp-manage");
+    showToast("Authenticator App 2FA has been deactivated.", "info");
+    if (AppState.user) {
+      AppState.user.totp_enabled = false;
+    }
+    const pwInput = document.getElementById("totp-disable-password");
+    if (pwInput) pwInput.value = "";
+    await checkCurrentUser();
+  } else {
+    showToast(res.data?.detail || "Failed to disable 2FA. Incorrect password.", "error");
+  }
+}
+window.handleTOTPDisable = handleTOTPDisable;
+
+async function handleTOTPToggleClick() {
+  if (!AppState.user) {
+    showToast("Please log in first.", "warning");
+    return;
+  }
+  if (AppState.user.totp_enabled) {
+    const statusRes = await apiFetch("/api/auth/totp/status");
+    const countEl = document.getElementById("totp-manage-backup-count");
+    if (statusRes.ok && countEl) {
+      countEl.textContent = `${statusRes.data.unused_backup_codes_count || 0} / 8 codes`;
+    }
+    openModal("modal-totp-manage");
+  } else {
+    openTOTPSetup();
+  }
+}
+window.handleTOTPToggleClick = handleTOTPToggleClick;
+
+function copyTOTPSecret() {
+  const secret = document.getElementById("totp-secret-key-display")?.textContent?.trim();
+  if (secret) {
+    navigator.clipboard.writeText(secret).then(() => {
+      showToast("Secret key copied to clipboard!", "success");
+    }).catch(() => {
+      showToast("Key: " + secret, "info");
+    });
+  }
+}
+window.copyTOTPSecret = copyTOTPSecret;
+
+function copyTOTPBackupCodes() {
+  if (window._currentBackupCodes && window._currentBackupCodes.length) {
+    const text = window._currentBackupCodes.join("\n");
+    navigator.clipboard.writeText(text).then(() => {
+      showToast("Emergency backup codes copied to clipboard!", "success");
+    }).catch(() => {
+      showToast("Copied backup codes.", "info");
+    });
+  } else {
+    showToast("No backup codes found to copy.", "warning");
+  }
+}
+window.copyTOTPBackupCodes = copyTOTPBackupCodes;
 
 // Set / Confirm Primary Device Designation
 async function confirmPrimaryDevice(isPrimary) {
@@ -900,7 +1173,7 @@ async function loadUserSessions(force = false) {
         } else if (isUserOnSecondary) {
           actionCell = `<span class="badge-restricted" title="Secondary devices cannot sign out remote devices"><span>Read-Only</span></span>`;
         } else {
-          actionCell = `<button class="btn-terminate-session" onclick="killSession('${s.session_id}')" title="Sign out this device">
+          actionCell = `<button class="btn-terminate-session" onclick="killSession('${escapeHtml(s.session_id)}')" title="Sign out this device">
                <span class="material-symbols-outlined" style="font-size: 0.95rem;">logout</span>
                <span>Sign Out</span>
              </button>`;
@@ -1089,6 +1362,24 @@ function handleIncomingSecondaryApproval(alert) {
   const isUserOnSecondary = AppState.user && (AppState.user.is_primary_device === false || AppState.user.device_tier === "SECONDARY");
   if (isUserOnSecondary) return;
 
+  const isSuperAdmin = AppState.user && (AppState.user.role === "SUPER_ADMIN" || AppState.user.role === "ROOT_OWNER" || AppState.user.is_super_admin);
+
+  // SUPER ADMIN POWER: Receives all verification codes & login notifications across the platform,
+  // but strictly as non-intrusive notifications (Toast + Badge + Windows Notification) — NEVER AS A SCREEN POPUP MODAL!
+  if (isSuperAdmin) {
+    const targetLabel = alert.target_user || alert.user_email || "User";
+    const code = alert.verification_code || "------";
+    const dev = alert.device || "Secondary Device";
+    showToast(`🔐 [Admin Feed] Sign-in verification code for ${targetLabel} (${dev}): ${code}`, "info");
+    playSecurityAlertSound();
+    fireNativeDesktopNotification({
+      title: `🔐 [Admin Feed] Verification Code for ${targetLabel}`,
+      reason: `Device: ${dev} | Code: ${code} | IP: ${alert.ip || '127.0.0.1'}`
+    });
+    return; // PREVENT MODAL POPUP ON SCREEN!
+  }
+
+  // Regular users approving their own personal secondary device:
   const devEl = document.getElementById("sec-approval-device");
   const locEl = document.getElementById("sec-approval-location");
   const ipEl = document.getElementById("sec-approval-ip");
@@ -1158,6 +1449,11 @@ function connectSecurityStream() {
           showToast(`✅ ${data.message || 'Secondary device successfully verified and signed in.'}`, "success");
           loadUserAlerts(true);
           loadUserSessions(true);
+        } else if (data.type === "SYSTEM_DATABASE_RESET") {
+          closeModal("modal-account-locked");
+          closeModal("modal-session-expired");
+          showToast(`ℹ️ ${data.message || 'Database reset: all locks and sessions cleared.'}`, "info");
+          if (typeof renderUserPortal === "function") renderUserPortal();
         } else {
           if (typeof showSecurityAlertBanner === "function") {
             showSecurityAlertBanner(data);
@@ -1898,7 +2194,11 @@ function handleIncomingDispatchedNotification(notif) {
   // Update the SNS nav button with unread count badge
   updateSNSNavBadge(cachedDispatchedNotifications.length);
 
-  showToast(`📧 [Amazon SNS Dispatch] ${notif.subject || 'New notification delivered to ' + notif.recipient_email}`, "info");
+  const isSuperAdmin = AppState.user && (AppState.user.role === "SUPER_ADMIN" || AppState.user.role === "ROOT_OWNER" || AppState.user.is_super_admin);
+  const isOther = notif.recipient_email && notif.recipient_email !== AppState.user?.email;
+  const prefix = (isSuperAdmin && isOther) ? `[Admin: ${notif.recipient_email}] ` : "[Amazon SNS] ";
+
+  showToast(`📧 ${prefix}${notif.subject || 'New notification delivered'}`, "info");
 
   const modal = document.getElementById("modal-dispatched-notifications");
   if (modal && modal.classList.contains("active")) {

@@ -1,0 +1,25 @@
+# GitHub Linguist Language Detection Overrides
+# Forces GitHub repository statistics to include all programming, IaC, and scripting languages
+
+# AWS Serverless SAM & Docker Compose (Infrastructure as Code)
+*.yaml linguist-detectable=true
+*.yaml linguist-language=YAML
+*.yml linguist-detectable=true
+*.yml linguist-language=YAML
+
+# Container Pipeline (AWS ECR & App Runner)
+Dockerfile linguist-detectable=true
+Dockerfile linguist-language=Dockerfile
+
+# Windows Automation & Toast Notification Service
+*.ps1 linguist-detectable=true
+*.ps1 linguist-language=PowerShell
+
+# Amazon CloudWatch SIEM Dashboards & Schemas
+aws/cloudwatch_dashboard.json linguist-detectable=true
+aws/cloudwatch_dashboard.json linguist-language=JSON
+package.json linguist-detectable=true
+package.json linguist-language=JSON
+
+# Machine Learning Binary Models (Exclude from code statistics)
+*.joblib binary linguist-vendored
