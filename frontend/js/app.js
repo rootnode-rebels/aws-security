@@ -84,7 +84,7 @@ function showSecurityAlertBanner(alert) {
     const origin = alert.origin || "Unknown Location";
     const ip = alert.ip || "Unknown IP";
     const dev = alert.device || "Unknown Device";
-    desc.innerHTML = `<strong>${reason}</strong> &bull; Device: <span style="color: #fff;">${dev}</span> &bull; Location: <span style="color: #fff;">${origin}</span> (<code>${ip}</code>). Access was blocked.`;
+    desc.innerHTML = `<strong>${escapeHtml(reason)}</strong> &bull; Device: <span style="color: #fff;">${escapeHtml(dev)}</span> &bull; Location: <span style="color: #fff;">${escapeHtml(origin)}</span> (<code>${escapeHtml(ip)}</code>). Access was blocked.`;
   }
 
   banner.style.display = "block";
@@ -259,7 +259,7 @@ function showToast(message, type = "info") {
   toast.setAttribute("role", "status");
   toast.innerHTML = `
     <span class="toast-icon">${type === "success" ? "✓" : type === "error" ? "⚠" : "ℹ"}</span>
-    <span>${cleanMsg}</span>
+    <span>${escapeHtml(cleanMsg)}</span>
   `;
   container.appendChild(toast);
 
@@ -919,7 +919,7 @@ function renderEmptyState(containerId, message) {
     <tr><td colspan="10">
       <div style="padding: 2rem; text-align: center; color: var(--text-dim);">
         <span class="material-symbols-outlined" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;">inventory_2</span>
-        <div>${message}</div>
+        <div>${escapeHtml(message)}</div>
       </div>
     </td></tr>
   `;

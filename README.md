@@ -85,13 +85,13 @@ flowchart TD
     end
 
     subgraph DEPLOY["2. Deployment & Container Pipeline"]
-        ECR["AWS Elastic Container Registry (ECR)<br/><code>242254325378.dkr.ecr.eu-central-1.amazonaws.com</code>"]
+        ECR["AWS Elastic Container Registry (ECR)<br/><code>&lt;account-id&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com</code>"]
         DOCKER["Multi-Stage Production Docker Build<br/>(Python 3.11-Slim Runtime)"]
         DOCKER -->|Pushed via AWS IAM Token| ECR
     end
 
     subgraph APPRUNNER["3. AWS App Runner (Production Compute & Edge Ingress)"]
-        AR_TLS["Auto-Managed TLS / SSL Termination<br/>(HTTPS: wviuki4xep.eu-central-1.awsapprunner.com)"]
+        AR_TLS["Auto-Managed TLS / SSL Termination<br/>(HTTPS: &lt;service-id&gt;.&lt;region&gt;.awsapprunner.com)"]
         AR_HC["Automated Health Checks<br/>(GET /api/system/status every 30s)"]
         AR_SCALE["Dynamic Auto-Scaler & Concurrency Balancer"]
         AR_APP["FastAPI ASGI High-Concurrency Engine<br/>(Sub-5ms Execution Latency)"]
@@ -145,9 +145,9 @@ flowchart TD
 ---
 
 ### 1. AWS App Runner (Production Compute & Edge Ingress)
-* **Production Service URL**: [`https://wviuki4xep.eu-central-1.awsapprunner.com/`](https://wviuki4xep.eu-central-1.awsapprunner.com/)
-* **Service ARN**: `arn:aws:apprunner:eu-central-1:242254325378:service/aws-security-app-service/e2c75827b7fe48a0963c9b0dc69ccc5e`
-* **Region**: `eu-central-1` (Frankfurt)
+* **Production Service URL**: `https://<service-id>.<region>.awsapprunner.com/`
+* **Service ARN**: `arn:aws:apprunner:<region>:<account-id>:service/aws-security-app-service/<service-id>`
+* **Region**: `eu-central-1` (or your configured AWS_REGION)
 * **How It Works**:
   - **Zero-Infrastructure Management**: AWS App Runner provides a fully managed container service that handles deployment, provisioning, load balancing, and auto-scaling without requiring virtual machine orchestration or Kubernetes overhead.
   - **Edge TLS & Certificate Lifecycle**: Automatically provisions, renews, and terminates TLS certificates at the AWS edge, enforcing HTTPS and modern cipher suites.
@@ -155,7 +155,7 @@ flowchart TD
   - **Zero-Downtime Rolling Updates**: Whenever a new image is pushed to AWS ECR, triggering `aws apprunner start-deployment` initiates a zero-downtime rolling update, draining in-flight requests gracefully before switching traffic to the new revision.
 
 ### 2. AWS Elastic Container Registry (ECR — Private Container Pipeline)
-* **Registry URI**: `242254325378.dkr.ecr.eu-central-1.amazonaws.com/aws-security-app:latest`
+* **Registry URI**: `<account-id>.dkr.ecr.<region>.amazonaws.com/aws-security-app:latest`
 * **How It Works**:
   - **Multi-Stage Hardened Image**: The Dockerfile builds in two distinct stages. The `builder` stage compiles all Python C-extensions (NumPy, Scikit-Learn, TensorFlow, PyMongo); the final `runtime` stage copies only the compiled wheels into a stripped-down `python:3.11-slim` base image.
   - **IAM Token Authentication**: Deployments authenticate securely via short-lived AWS IAM authorization tokens generated with `aws ecr get-login-password --region eu-central-1`.
@@ -176,7 +176,7 @@ flowchart TD
   - If `BlockedHijacks > 5` within 1 minute, the alarm transitions to `ALARM` state and automatically invokes incident notification workflows via Amazon SNS.
 
 ### 4. Amazon SNS & SES (Cross-Region Out-of-Band Incident Dispatch)
-* **SNS Topic**: `AccountHijackSecurityAlerts` (`arn:aws:sns:eu-central-1:242254325378:AccountHijackSecurityAlerts`)
+* **SNS Topic**: `AccountHijackSecurityAlerts` (`arn:aws:sns:<region>:<account-id>:AccountHijackSecurityAlerts`)
 * **How It Works**:
   - **Cross-Region ARN Resolution**: Implements dynamic ARN parsing in `notification_service.py` to seamlessly route messages between `us-east-1` and `eu-central-1` without SDK region mismatches.
   - **Dual-Delivery Fanout**: High-risk threat alerts ($> 70\text{ pts}$) and step-up MFA codes are dispatched out-of-band via Amazon SNS (Email/SMS) while simultaneously streaming to the user's primary device screen via 0ms Server-Sent Events (SSE).
@@ -206,10 +206,10 @@ For organizations requiring a pure serverless microservices deployment, the plat
 
 | AWS Service | Production Identifier / ARN | Purpose in Platform | Live Status |
 | :--- | :--- | :--- | :---: |
-| **AWS App Runner** | `arn:aws:apprunner:eu-central-1:242254325378:service/aws-security-app-service/...` | Primary container compute, TLS edge, and auto-scaling | **Active (Live)** |
-| **AWS ECR** | `242254325378.dkr.ecr.eu-central-1.amazonaws.com/aws-security-app:latest` | Secure private Docker container image registry | **Active (Live)** |
+| **AWS App Runner** | `arn:aws:apprunner:<region>:<account-id>:service/aws-security-app-service/...` | Primary container compute, TLS edge, and auto-scaling | **Active (Live)** |
+| **AWS ECR** | `<account-id>.dkr.ecr.<region>.amazonaws.com/aws-security-app:latest` | Secure private Docker container image registry | **Active (Live)** |
 | **Amazon CloudWatch** | `/aws/apprunner/aws-security-app-service` & custom SIEM metrics | Structured JSON logs, latency metrics, and threat alarms | **Active (Live)** |
-| **Amazon SNS** | `arn:aws:sns:eu-central-1:242254325378:AccountHijackSecurityAlerts` | Multi-channel SMS and email threat dispatch | **Active (Live)** |
+| **Amazon SNS** | `arn:aws:sns:<region>:<account-id>:AccountHijackSecurityAlerts` | Multi-channel SMS and email threat dispatch | **Active (Live)** |
 | **AWS SAM & Lambda** | Defined in `aws/template.yaml` (`AccountSecurityApi`, Lambdas) | Modular serverless microservices export configuration | **Configured** |
 | **Amazon SES** | Configured via SMTP / SES endpoint | Out-of-band email notifications and OTP verification | **Active** |
 

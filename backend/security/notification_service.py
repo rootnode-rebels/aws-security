@@ -267,10 +267,14 @@ class NotificationDispatcher:
 
         server = None
         try:
+            safe_subject = re.sub(r'[\r\n]+', ' ', str(subject or '')).strip()
+            safe_recipient = re.sub(r'[\r\n]+', '', str(recipient_email or '')).strip()
+            safe_from = re.sub(r'[\r\n]+', '', str(self.from_email or '')).strip()
+
             msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"] = self.from_email
-            msg["To"] = recipient_email
+            msg["Subject"] = safe_subject
+            msg["From"] = safe_from
+            msg["To"] = safe_recipient
             msg["Date"] = smtplib.email.utils.formatdate(localtime=False)
             msg["Message-ID"] = smtplib.email.utils.make_msgid(domain="awssecurity.io")
 

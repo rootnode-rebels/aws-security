@@ -98,7 +98,7 @@ class LocalCollection:
             curr = curr[p]
         curr[parts[-1]] = value
 
-    def update_one(self, query: Dict[str, Any], update: Dict[str, Any]) -> bool:
+    def update_one(self, query: Dict[str, Any], update: Dict[str, Any], upsert: bool = False, *args, **kwargs) -> bool:
         with self.parent.lock:
             docs = self.parent.get_collection_data(self.name)
             for i, doc in enumerate(docs):
@@ -117,9 +117,50 @@ class LocalCollection:
                     docs[i] = doc
                     self.parent.save()
                     return True
+            if upsert:
+                new_doc = dict(query)
+                if "$set" in update:
+                    for k, v in update["$set"].items():
+                        if "." in k:
+                            self._set_nested(new_doc, k, v)
+                        else:
+                            new_doc[k] = v
+                if "$setOnInsert" in update:
+                    for k, v in update["$setOnInsert"].items():
+                        if "." in k:
+                            self._set_nested(new_doc, k, v)
+                        else:
+                            new_doc[k] = v
+                self.insert_one(new_doc)
+                return True
             return False
 
-    def update_many(self, query: Dict[str, Any], update: Dict[str, Any]) -> int:
+    def find_one_and_update(self, query: Dict[str, Any], update: Dict[str, Any], *args, **kwargs) -> Optional[Dict[str, Any]]:
+        with self.parent.lock:
+            docs = self.parent.get_collection_data(self.name)
+            for i, doc in enumerate(docs):
+                if self._matches(doc, query):
+                    old_doc = json.loads(json.dumps(doc))
+                    if "$set" in update:
+                        for k, v in update["$set"].items():
+                            if "." in k:
+                                self._set_nested(doc, k, v)
+                            else:
+                                doc[k] = v
+                    if "$unset" in update:
+                        for k in update["$unset"]:
+                            doc.pop(k, None)
+                    if "$push" in update:
+                        for k, v in update["$push"].items():
+                            if k not in doc or not isinstance(doc[k], list):
+                                doc[k] = []
+                            doc[k].append(v)
+                    docs[i] = doc
+                    self.parent.save()
+                    return old_doc
+            return None
+
+    def update_many(self, query: Dict[str, Any], update: Dict[str, Any], *args, **kwargs) -> int:
         with self.parent.lock:
             docs = self.parent.get_collection_data(self.name)
             updated_count = 0
@@ -474,6 +515,18 @@ class MongoCollectionWrapper:
         except Exception as e:
             print(f"[DB] Mongo update_one error: {e}")
             return False
+
+    def find_one_and_update(self, query=None, update=None, *args, **kwargs):
+        filter_query = _normalize_filter(query)
+        update_spec = update if update is not None else {}
+        def _op(col):
+            doc = col.find_one_and_update(filter_query, update_spec, *args, **kwargs)
+            return _sanitize_mongo_value(dict(doc)) if doc is not None else None
+        try:
+            return self._execute_with_retry(_op)
+        except Exception as e:
+            print(f"[DB] Mongo find_one_and_update error: {e}")
+            return None
 
     def insert_one(self, doc, *args, **kwargs):
         try:

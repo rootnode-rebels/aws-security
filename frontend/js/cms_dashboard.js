@@ -142,7 +142,7 @@ async function cmsFetchUsers() {
     });
   } catch (err) {
     console.error('[CMS] Error fetching users:', err);
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--accent-crimson);">Error loading users: ${err.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--accent-crimson);">Error loading users: ${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -367,7 +367,7 @@ async function cmsFetchSessions() {
 
       const statusBadge = (sess.status === 'ACTIVE' || !sess.status)
         ? '<span class="badge badge-low font-mono">ACTIVE</span>'
-        : `<span class="badge badge-critical font-mono">${sess.status}</span>`;
+        : `<span class="badge badge-critical font-mono">${escapeHtml(sess.status)}</span>`;
 
       const loginTime = sess.created_at ? new Date(sess.created_at).toLocaleString() : 'Recent';
       const city = sess.geo?.city || 'Local Network';
@@ -622,7 +622,7 @@ async function godmodeLoadApprovals() {
     });
   } catch (err) {
     console.error('[GodMode] Error fetching approvals:', err);
-    container.innerHTML = `<div style="text-align: center; color: var(--accent-crimson); padding: 1rem 0; font-size: 0.85rem;">Error loading approvals: ${err.message}</div>`;
+    container.innerHTML = `<div style="text-align: center; color: var(--accent-crimson); padding: 1rem 0; font-size: 0.85rem;">Error loading approvals: ${escapeHtml(err.message)}</div>`;
   }
 }
 window.godmodeLoadApprovals = godmodeLoadApprovals;

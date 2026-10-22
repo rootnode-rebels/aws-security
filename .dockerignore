@@ -1,18 +1,56 @@
-.git
+# Git & Version Control
+.git/
 .gitignore
+.gitattributes
+
+# Environment & Secrets (NEVER bake credentials into images)
 .env
+.env.*
+*.env
+
+# Python Caches & Virtual Environments
 __pycache__/
 *.py[cod]
 *$py.class
 .venv/
 venv/
 env/
+.pytest_cache/
+
+# Local database files
 data/*.json
 data/db.json
 !data/.gitkeep
+
+# Temporary, Test & Audit Files
+tests/
+scripts/
+docs/
 *.log
 *.pdf
 *.docx
 *.zip
+*.txt
+!requirements.txt
+test_results.txt
+check_roles.py
+
+# Windows / Host Execution Scripts
 *.bat
-tests/
+*.cmd
+*.ps1
+
+# Documentation & Project Metadata
+*.md
+LICENSE
+package.json
+
+# AWS IaC Templates (deployed via AWS CLI / SAM, not in container)
+aws/
+
+# IDE & OS Configurations
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+

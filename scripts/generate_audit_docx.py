@@ -424,8 +424,8 @@ def generate_report():
     deploy_points = [
         ("Git Repository Synchronization", "Branch main is fast-forwarded and fully up to date with origin/main (efc7805). Uncommitted files consist of local test assertion fix and local database seeding configuration."),
         ("Docker Container Build Queue", "Dockerfile employs a multi-stage Python 3.11-slim builder. Application assets (backend/, database/, frontend/, run_standalone.py) are bundled, while tests and local data files are cleanly excluded via .dockerignore."),
-        ("AWS ECR Container Push", "Image target: 242254325378.dkr.ecr.eu-central-1.amazonaws.com/aws-security-app:latest. Authentication via AWS CLI (aws ecr get-login-password --region eu-central-1)."),
-        ("AWS App Runner Service Deployment", "Automated deployment target: arn:aws:apprunner:eu-central-1:242254325378:service/aws-security-app-service/e2c75827b7fe48a0963c9b0dc69ccc5e.")
+        ("AWS ECR Container Push", "Image target: <account-id>.dkr.ecr.<region>.amazonaws.com/aws-security-app:latest. Authentication via AWS CLI (aws ecr get-login-password --region <region>)."),
+        ("AWS App Runner Service Deployment", "Automated deployment target: arn:aws:apprunner:<region>:<account-id>:service/aws-security-app-service/<service-id>.")
     ]
     for d_title, d_desc in deploy_points:
         style_heading(doc, d_title, level=2)

@@ -1526,13 +1526,24 @@ def verify_mfa(payload: VerifyMFASchema):
 
 
 @app.get("/api/auth/mfa-poll/{temp_token}")
-def poll_mfa_status(temp_token: str):
+def poll_mfa_status(temp_token: str, request: Request):
     """Allows a waiting secondary device to check if the Primary Device approved its login."""
+    client_ip = resolve_client_ip(request)
+    is_locked, remaining = rate_limiter.is_locked(f"poll:{client_ip}")
+    if is_locked:
+        raise HTTPException(status_code=429, detail=f"Polling rate limit exceeded. Please wait {remaining}s.")
+
     user = db.users.find_one({"mfa_pending.temp_token": temp_token})
     if not user or not user.get("mfa_pending"):
+        rate_limiter.record_failure(f"poll:{client_ip}")
         return {"status": "EXPIRED", "message": "Verification challenge expired or already handled."}
 
     mfa_state = user["mfa_pending"]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if mfa_state.get("expires_at", "") and mfa_state.get("expires_at") < now_iso:
+        db.users.update_one({"email": user["email"]}, {"$set": {"mfa_pending": None}})
+        return {"status": "EXPIRED", "message": "Verification challenge expired."}
+
     if mfa_state.get("approved") == True:
         email = user["email"]
         fp = mfa_state.get("fingerprint", {})
@@ -1667,8 +1678,18 @@ def approve_secondary_device(
 
 
 @app.post("/api/auth/unlock-self")
-def unlock_self(request: Request, user: Dict[str, Any] = Depends(get_current_user)):
+def unlock_self(request: Request, authorization: Optional[str] = Header(None), user: Dict[str, Any] = Depends(get_current_user)):
     """Allows the authenticated Primary Device owner to unfreeze and restore their own account."""
+    token = authorization.split(" ")[1] if authorization and authorization.startswith("Bearer ") else None
+    session = db.active_sessions.find_one({"session_token": token}) if token else None
+    is_primary = bool(session and (session.get("is_primary_device") or session.get("device_tier") == "PRIMARY"))
+    is_admin = is_super_admin_account(user)
+    if not is_primary and not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Security Policy Restriction: Account unfreeze can only be initiated from your Primary Security Portal."
+        )
+
     email = user["email"]
     client_ip = resolve_client_ip(request)
     db.users.update_one(
@@ -1749,7 +1770,15 @@ def forgot_password(payload: ForgotPasswordSchema, request: Request):
 @app.post("/api/auth/reset-password")
 def reset_password(payload: ResetPasswordSchema):
     token = payload.token.strip()
-    record = db.password_resets.find_one({"reset_token": token, "used": False})
+    is_valid, msg = validate_password_strength(payload.new_password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=msg)
+
+    # Atomic token claim: prevents race condition double-spending
+    record = db.password_resets.find_one_and_update(
+        {"reset_token": token, "used": False},
+        {"$set": {"used": True}}
+    )
     if not record:
         raise HTTPException(status_code=400, detail="Invalid or already used password reset link.")
 
@@ -1757,16 +1786,9 @@ def reset_password(payload: ResetPasswordSchema):
     if record.get("expires_at", "") < now_iso:
         raise HTTPException(status_code=400, detail="Reset link has expired. Please request a new one.")
 
-    is_valid, msg = validate_password_strength(payload.new_password)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=msg)
-
     # Hash new password
     new_hash, new_salt = hash_password(payload.new_password)
     email = record["email"]
-
-    # Invalidate token
-    db.password_resets.update_one({"reset_token": token}, {"$set": {"used": True}})
 
     # Invalidate all active sessions for security!
     db.active_sessions.delete_many({"user_email": email})
@@ -2008,10 +2030,18 @@ def totp_disable(payload: TOTPDisableSchema, request: Request, user: Dict[str, A
     Deactivates TOTP 2FA. Requires master password verification for defense in depth.
     """
     email = user["email"]
-    client_ip = request.client.host if request.client else "127.0.0.1"
+    client_ip = resolve_client_ip(request)
+
+    is_locked, remaining = rate_limiter.is_locked(f"disable_totp:{email}")
+    if is_locked:
+        raise HTTPException(status_code=429, detail=f"Too many failed verification attempts. Please wait {remaining}s.")
 
     if not verify_password(payload.current_password, user.get("password_hash", ""), user.get("salt", "")):
+        rate_limiter.record_failure(client_ip)
+        rate_limiter.record_failure(f"disable_totp:{email}")
         raise HTTPException(status_code=400, detail="Incorrect current master password.")
+
+    rate_limiter.record_success(f"disable_totp:{email}")
 
     db.users.update_one(
         {"email": email},
@@ -2201,11 +2231,13 @@ def totp_verify_recovery(payload: TOTPRecoveryVerifySchema, request: Request):
 
 @app.post("/api/auth/devices/set-primary")
 @app.post("/api/auth/set-primary-device")
-def set_primary_device(payload: SetPrimaryDeviceSchema, authorization: Optional[str] = Header(None), user: Dict[str, Any] = Depends(get_current_user)):
+def set_primary_device(payload: SetPrimaryDeviceSchema, request: Request = None, authorization: Optional[str] = Header(None), user: Dict[str, Any] = Depends(get_current_user)):
     token = authorization.split(" ")[1] if authorization and authorization.startswith("Bearer ") else None
     session = db.active_sessions.find_one({"session_token": token})
     if not session:
         raise HTTPException(status_code=401, detail="Active session not found.")
+
+    client_ip = resolve_client_ip(request) if request else "127.0.0.1"
 
     # Master Secondary Security Password verification when setting or transferring Primary Device:
     current_primary = user.get("primary_device")
@@ -2217,29 +2249,44 @@ def set_primary_device(payload: SetPrimaryDeviceSchema, authorization: Optional[
                     status_code=400,
                     detail="Master Secondary Security Password is required to transfer Primary Device authority."
                 )
+
+            is_locked, remaining = rate_limiter.is_locked(f"sec_pwd:{user['email']}")
+            if is_locked:
+                raise HTTPException(status_code=429, detail=f"Too many failed password attempts. Please wait {remaining}s.")
+
             sec_hash = user.get("secondary_password_hash")
             sec_salt = user.get("secondary_password_salt")
             verified = False
             if sec_hash and sec_salt:
                 verified = verify_password(payload.secondary_password, sec_hash, sec_salt)
             if not verified:
+                rate_limiter.record_failure(client_ip)
+                rate_limiter.record_failure(f"sec_pwd:{user['email']}")
                 raise HTTPException(
                     status_code=401,
                     detail="Incorrect Secondary Security Password. Primary Device transfer denied."
                 )
+            rate_limiter.record_success(f"sec_pwd:{user['email']}")
         else:
             # Primary device itself confirming: if secondary password supplied, verify it
             if payload.secondary_password:
+                is_locked, remaining = rate_limiter.is_locked(f"sec_pwd:{user['email']}")
+                if is_locked:
+                    raise HTTPException(status_code=429, detail=f"Too many failed password attempts. Please wait {remaining}s.")
+
                 sec_hash = user.get("secondary_password_hash")
                 sec_salt = user.get("secondary_password_salt")
                 verified = False
                 if sec_hash and sec_salt:
                     verified = verify_password(payload.secondary_password, sec_hash, sec_salt)
                 if not verified:
+                    rate_limiter.record_failure(client_ip)
+                    rate_limiter.record_failure(f"sec_pwd:{user['email']}")
                     raise HTTPException(
                         status_code=401,
                         detail="Incorrect Secondary Security Password."
                     )
+                rate_limiter.record_success(f"sec_pwd:{user['email']}")
 
     fp = session.get("fingerprint") or {}
     browser_name = fp.get("browser", "Browser")
@@ -2299,13 +2346,27 @@ def set_primary_device(payload: SetPrimaryDeviceSchema, authorization: Optional[
 @app.post("/api/auth/secondary-password/update")
 def update_secondary_password(payload: UpdateSecondaryPasswordSchema, request: Request = None, user: Dict[str, Any] = Depends(get_current_user)):
     """Allows user to update their Master Secondary Security Password."""
+    client_ip = resolve_client_ip(request) if request else "127.0.0.1"
+    is_locked, remaining = rate_limiter.is_locked(f"sec_pwd:{user['email']}")
+    if is_locked:
+        raise HTTPException(status_code=429, detail=f"Too many failed password attempts. Please wait {remaining}s.")
+
     valid = verify_password(payload.current_password, user["password_hash"], user["salt"])
     if not valid and user.get("secondary_password_hash") and user.get("secondary_password_salt"):
         valid = verify_password(payload.current_password, user["secondary_password_hash"], user["secondary_password_salt"])
     
     if not valid:
+        rate_limiter.record_failure(client_ip)
+        rate_limiter.record_failure(f"sec_pwd:{user['email']}")
         raise HTTPException(status_code=401, detail="Authentication failed: Incorrect current password.")
-    
+
+    rate_limiter.record_success(f"sec_pwd:{user['email']}")
+
+    # AUDIT2-07: Validate password complexity for secondary security password
+    is_valid, msg = validate_password_strength(payload.new_secondary_password)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Secondary Password does not meet security policy: {msg}")
+
     new_hash, new_salt = hash_password(payload.new_secondary_password)
     db.users.update_one(
         {"email": user["email"]},
@@ -2321,7 +2382,6 @@ def update_secondary_password(payload: UpdateSecondaryPasswordSchema, request: R
         message=f"Secondary Security Password rotated for {user['email']}"
     )
 
-    client_ip = request.client.host if (request and request.client) else "127.0.0.1"
     notif = notification_service.send_secondary_password_changed(user["email"], client_ip)
     broadcaster.broadcast_sync(user["email"], {"type": "NOTIFICATION_DISPATCHED", "notification": notif})
 
@@ -2516,6 +2576,7 @@ def lock_account(request: Request, authorization: Optional[str] = Header(None), 
 @app.post("/api/auth/delete-account")
 def delete_account(payload: AccountDeleteSchema, request: Request, user: Dict[str, Any] = Depends(get_current_user)):
     email = user["email"]
+    client_ip = resolve_client_ip(request)
 
     # LOW-01 Fix: Root and Super Administrators cannot be deleted via self-service
     if is_super_admin_account(user) or user.get("role") in ("SUPER_ADMIN", "ROOT_OWNER") or user.get("is_root_admin"):
@@ -2524,9 +2585,17 @@ def delete_account(payload: AccountDeleteSchema, request: Request, user: Dict[st
             detail="Security Policy Restriction: Root and Super Administrator accounts cannot be deleted via self-service."
         )
 
+    is_locked, remaining = rate_limiter.is_locked(f"delete_acct:{email}")
+    if is_locked:
+        raise HTTPException(status_code=429, detail=f"Too many failed password attempts. Please wait {remaining}s.")
+
     # Verify password before irreversible deletion
     if not verify_password(payload.password, user["password_hash"], user["salt"]):
+        rate_limiter.record_failure(client_ip)
+        rate_limiter.record_failure(f"delete_acct:{email}")
         raise HTTPException(status_code=401, detail="Incorrect password. Account deletion aborted.")
+
+    rate_limiter.record_success(f"delete_acct:{email}")
 
     db.active_sessions.delete_many({"user_email": email})
     db.security_events.delete_many({"user_email": email})
@@ -2669,6 +2738,11 @@ def clear_dispatched_notifications(user: Dict[str, Any] = Depends(get_current_us
 def test_notification(payload: TestNotificationSchema, request: Request, user: Dict[str, Any] = Depends(get_current_user)):
     """Allows testing Amazon SNS / Email dispatch live."""
     client_ip = resolve_client_ip(request)
+    is_locked, remaining = rate_limiter.is_locked(f"test_notif:{user['email']}")
+    if is_locked:
+        raise HTTPException(status_code=429, detail=f"Test notification rate limit reached. Please wait {remaining}s.")
+    rate_limiter.record_failure(f"test_notif:{user['email']}")
+
     target_email = sanitize_email(payload.recipient_email)
     is_admin = bool(user.get("role") in ("SUPER_ADMIN", "SECURITY_ADMIN") or user.get("is_super_admin"))
     if not is_admin and target_email.lower() != user.get("email", "").lower():
@@ -3108,6 +3182,7 @@ def trigger_watchdog_audit(user: Optional[Dict[str, Any]] = Depends(get_optional
 @app.post("/api/system/database-reset")
 def reset_system_database(
     clear_sessions: bool = True,
+    request: Request = None,
     user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)
 ):
     """
@@ -3122,8 +3197,11 @@ def reset_system_database(
 
     if user and not is_admin:
         raise HTTPException(status_code=403, detail="Super Admin authorization required to reset database.")
-    if not user and is_prod:
-        raise HTTPException(status_code=401, detail="Authentication required to reset database in production.")
+    if not user:
+        client_ip = resolve_client_ip(request) if request else "127.0.0.1"
+        is_loopback = client_ip in ("127.0.0.1", "::1", "localhost", "testclient")
+        if is_prod or not is_loopback:
+            raise HTTPException(status_code=401, detail="Authentication required to reset database.")
 
     # 1. Reset database connection, unlock all accounts, and purge expired/stale sessions
     preserve_email = user.get("email") if user else None
@@ -3628,6 +3706,10 @@ def serve_service_worker():
 
 @app.get("/{full_path:path}")
 def serve_spa(full_path: str):
+    # AUDIT2-12: Non-existent API routes must return 404 JSON, not HTML index.html
+    if full_path and (full_path == "api" or full_path.startswith("api/")):
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+
     frontend_abs = os.path.abspath(FRONTEND_DIR)
     # Prevent directory traversal attacks
     if full_path:

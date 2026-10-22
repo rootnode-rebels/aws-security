@@ -774,7 +774,7 @@ async function openTOTPSetup() {
     if (backupGrid && Array.isArray(res.data.backup_codes)) {
       window._currentBackupCodes = res.data.backup_codes;
       backupGrid.innerHTML = res.data.backup_codes.map(code => 
-        `<div style="background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); padding: 0.35rem; border-radius: 4px; color: #fde68a;"><code>${code}</code></div>`
+        `<div style="background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); padding: 0.35rem; border-radius: 4px; color: #fde68a;"><code>${escapeHtml(code)}</code></div>`
       ).join("");
     }
 
@@ -1110,8 +1110,8 @@ async function loadUserSessions(force = false) {
                     <span class="material-symbols-outlined">${dIcon}</span>
                   </div>
                   <div>
-                    <div class="secondary-trust-name">${s.device || 'Secondary Device'}</div>
-                    <div class="secondary-trust-meta">IP: ${s.ip_address} &bull; ${s.geo?.city || 'Local'} &bull; ${new Date(s.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                    <div class="secondary-trust-name">${escapeHtml(s.device || 'Secondary Device')}</div>
+                    <div class="secondary-trust-meta">IP: ${escapeHtml(s.ip_address || '127.0.0.1')} &bull; ${escapeHtml(s.geo?.city || 'Local')} &bull; ${new Date(s.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
                   </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
@@ -1658,7 +1658,7 @@ async function loadUserAlerts(force = false) {
         let actionsHtml = "";
         if (isUserOnSecondary) {
           actionsHtml = `
-            <button class="btn btn-secondary btn-sm" onclick="dismissUserAlert('${a.alert_id}')">
+            <button class="btn btn-secondary btn-sm" onclick="dismissUserAlert('${escapeHtml(a.alert_id)}')">
               <span>Dismiss</span>
             </button>
             <span class="badge-restricted" style="margin-left: auto;">READ-ONLY</span>
@@ -1666,31 +1666,31 @@ async function loadUserAlerts(force = false) {
         } else if (isSecondaryApproval) {
           if (isPending) {
             actionsHtml = `
-              <button class="btn btn-primary btn-sm" onclick="executeApproveSecondary(true, '${a.temp_token || 'LATEST'}')">
+              <button class="btn btn-primary btn-sm" onclick="executeApproveSecondary(true, '${escapeHtml(a.temp_token || 'LATEST')}')">
                 <span class="material-symbols-outlined" style="font-size: 1rem;">check_circle</span>
                 <span>Allow Manually (1-Click Approval)</span>
               </button>
-              <button class="btn btn-danger btn-sm" onclick="executeApproveSecondary(false, '${a.temp_token || 'LATEST'}')">
+              <button class="btn btn-danger btn-sm" onclick="executeApproveSecondary(false, '${escapeHtml(a.temp_token || 'LATEST')}')">
                 <span class="material-symbols-outlined" style="font-size: 0.9rem;">cancel</span>
                 <span>Deny & Block</span>
               </button>
-              <button class="btn btn-secondary btn-sm" onclick="dismissUserAlert('${a.alert_id}')">
+              <button class="btn btn-secondary btn-sm" onclick="dismissUserAlert('${escapeHtml(a.alert_id)}')">
                 <span>Dismiss</span>
               </button>
             `;
           } else {
             actionsHtml = `
-              <button class="btn btn-secondary btn-sm" onclick="dismissUserAlert('${a.alert_id}')">
+              <button class="btn btn-secondary btn-sm" onclick="dismissUserAlert('${escapeHtml(a.alert_id)}')">
                 <span>Dismiss</span>
               </button>
-              <span class="badge-protected" style="margin-left: auto;">${a.status || 'RESOLVED'}</span>
+              <span class="badge-protected" style="margin-left: auto;">${escapeHtml(a.status || 'RESOLVED')}</span>
             `;
           }
         } else {
           if (isFailedLogin) {
             // Attacker failed to log in - DO NOT show "Terminate Attacker" (no session exists!)
             actionsHtml = `
-              <button class="btn btn-secondary btn-sm" onclick="dismissUserAlert('${a.alert_id}')">
+              <button class="btn btn-secondary btn-sm" onclick="dismissUserAlert('${escapeHtml(a.alert_id)}')">
                 <span>Dismiss</span>
               </button>
               <button class="btn btn-warning btn-sm" onclick="openPasswordModal('auth')" title="Change your password if you think someone guessed it">
@@ -1701,7 +1701,7 @@ async function loadUserAlerts(force = false) {
             `;
           } else if (isSecondaryLogin) {
             actionsHtml = `
-              <button class="btn btn-secondary btn-sm" onclick="dismissUserAlert('${a.alert_id}')">
+              <button class="btn btn-secondary btn-sm" onclick="dismissUserAlert('${escapeHtml(a.alert_id)}')">
                 <span>Dismiss</span>
               </button>
               <button class="btn btn-warning btn-sm" onclick="killAllOtherSessions()" title="Sign out this device if you don't recognize it">
@@ -1711,7 +1711,7 @@ async function loadUserAlerts(force = false) {
             `;
           } else {
             actionsHtml = `
-              <button class="btn btn-secondary btn-sm" onclick="dismissUserAlert('${a.alert_id}')">
+              <button class="btn btn-secondary btn-sm" onclick="dismissUserAlert('${escapeHtml(a.alert_id)}')">
                 <span>Dismiss</span>
               </button>
               <button class="btn btn-warning btn-sm" onclick="killAllOtherSessions()" title="Sign out all other devices immediately">
